@@ -1,6 +1,6 @@
-# ApiClient Library for .NET
+# ApiClient Library for .NET Core and .NET 5+ applications
 
-A modern, resilient HTTP API client library for .NET applications, providing clean async HTTP operations with built-in retry policies using Polly v8, comprehensive error handling, and structured logging support.
+A modern, resilient HTTP API client library for .NET Core and .NET 5+ applications, providing clean, async HTTP operations with built-in retry policies using Polly v8, comprehensive error handling, and structured logging support. Optimized for high-performance API consumption in cross-platform and cloud-native environments.
 
 ## 🎯 Features
 

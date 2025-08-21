@@ -8,7 +8,7 @@
 
 	  <!-- Metadados do pacote NuGet -->
 	  <PackageId>ARSoft.RestApiClient</PackageId>
-	  <Version>1.0.0</Version>
+	  <Version>3.0.0</Version>
 	  <Authors>Alisson Santana</Authors>
 	  <Company>ARSoftware</Company>
 	  <Description>A modern, resilient HTTP API client library for .NET Core/5+ applications, providing clean async HTTP operations with built-in retry policies, comprehensive error handling, and structured logging support.	  </Description>
@@ -19,7 +19,7 @@
 	  <PackageTags>api rest httpclient polly json .net</PackageTags>
 	  <PackageReleaseNotes>
 		  Modern .NET Support: Built for .NET Core 3.1+ and .NET 5+
-		  System.Text.Json: High-performance JSON serialization (no Newtonsoft.Json dependency)
+		  System.Text.Json: High-performance JSON serialization
 		  Polly Integration: Built-in retry policies with exponential backoff using modern Polly extensions
 		  Structured Logging: ILogger integration for comprehensive request/response logging
 		  Multiple Auth Types: Bearer, Basic, and API Key authentication support
