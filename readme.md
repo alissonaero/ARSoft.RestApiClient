@@ -1,17 +1,17 @@
-# ApiClient Library for .NET Core
+# ApiClient Library for .NET
 
-A modern, resilient HTTP API client library for .NET Core/5+ applications, providing clean async HTTP operations with built-in retry policies, comprehensive error handling, and structured logging support.
+A modern, resilient HTTP API client library for .NET applications, providing clean async HTTP operations with built-in retry policies using Polly v8, comprehensive error handling, and structured logging support.
 
 ## 🎯 Features
 
-- **Modern .NET Support**: Built for .NET Core 3.1+ and .NET 5+
-- **System.Text.Json**: High-performance JSON serialization (no Newtonsoft.Json dependency)
-- **Polly Integration**: Built-in retry policies with exponential backoff using modern Polly extensions
+- **Modern .NET Support**: Built for .NET 6+ with nullable reference types
+- **Polly v8 Integration**: Built-in resilience pipelines with exponential backoff and jitter
 - **Structured Logging**: ILogger integration for comprehensive request/response logging
 - **Multiple Auth Types**: Bearer, Basic, and API Key authentication support
 - **Clean Architecture**: SOLID principles with dependency injection support
 - **Comprehensive Error Handling**: Detailed error responses with HTTP status codes
 - **Async/Await**: Full asynchronous operation support with cancellation tokens
+- **Resource Management**: Proper disposal support with optional HttpClient disposal
 
 ## 🚀 Quick Start
 
@@ -20,30 +20,8 @@ A modern, resilient HTTP API client library for .NET Core/5+ applications, provi
 Add to your project via NuGet Package Manager or .csproj:
 
 ```xml
-<PackageReference Include="System.Text.Json" Version="8.0.0" />
-<PackageReference Include="Microsoft.Extensions.Http.Polly" Version="8.0.0" />
-<PackageReference Include="Microsoft.Extensions.Logging" Version="8.0.0" />
-```
-
-### Basic Usage
-
-```csharp
-using ARSoft.ApiClient;
-
-// Simple usage with default configuration
-using var httpClient = new HttpClient();
-using var apiClient = new ApiClient(httpClient);
-
-var response = await apiClient.GetAsync<User>(new Uri("https://api.example.com/users/1"));
-
-if (response.Success)
-{
-    Console.WriteLine($"User: {response.Data.Name}");
-}
-else
-{
-    Console.WriteLine($"Error {(int)response.StatusCode}: {response.ErrorMessage}");
-}
+<PackageReference Include="Polly.Core" Version="8.6.2" />
+<PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="9.0.8" />
 ```
 
 ## 📖 Dependency Injection Setup
@@ -51,33 +29,36 @@ else
 ### ASP.NET Core Integration
 
 ```csharp
-// Program.cs or Startup.cs
-builder.Services.AddHttpClient<IApiClient, ApiClient>()
-    .AddPolicyHandler(GetRetryPolicy());
+// Program.cs
+builder.Services.AddHttpClient<IApiClient, ApiClient>();
 
-// Custom retry policy
-static IAsyncPolicy<HttpResponseMessage> GetRetryPolicy()
-{
-    return HttpPolicyExtensions
-        .HandleTransientHttpError()
-        .OrResult(msg => (int)msg.StatusCode == 429)
-        .WaitAndRetryAsync(
-            retryCount: 3,
-            sleepDurationProvider: retryAttempt => TimeSpan.FromSeconds(Math.Pow(2, retryAttempt)),
-            onRetry: (outcome, timespan, retryCount, context) =>
-            {
-                Console.WriteLine($"Retry {retryCount} after {timespan}s");
-            });
-}
-
-// Service registration
+// Custom configuration
 builder.Services.AddScoped<IApiClient>(provider =>
 {
     var httpClient = provider.GetRequiredService<HttpClient>();
     var logger = provider.GetRequiredService<ILogger<ApiClient>>();
-    var retryPolicy = GetRetryPolicy();
     
-    return new ApiClient(httpClient, logger, null, retryPolicy);
+    // Optional: Custom JSON options
+    var jsonOptions = new JsonSerializerOptions
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
+    };
+    
+    // Optional: Custom retry pipeline
+    var retryOptions = new RetryStrategyOptions<HttpResponseMessage>
+    {
+        MaxRetryAttempts = 5,
+        Delay = TimeSpan.FromSeconds(2),
+        BackoffType = DelayBackoffType.Exponential,
+        UseJitter = true
+    };
+    
+    var retryPipeline = new ResiliencePipelineBuilder<HttpResponseMessage>()
+        .AddRetry(retryOptions)
+        .Build();
+    
+    return new ApiClient(httpClient, logger, jsonOptions, retryPipeline);
 });
 ```
 
@@ -86,19 +67,17 @@ builder.Services.AddScoped<IApiClient>(provider =>
 ```csharp
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Http;
 
 var services = new ServiceCollection();
 
 // Add logging
 services.AddLogging(builder => builder.AddConsole());
 
-// Add HttpClient with Polly
-services.AddHttpClient<IApiClient, ApiClient>()
-    .AddPolicyHandler(HttpPolicyExtensions
-        .HandleTransientHttpError()
-        .WaitAndRetryAsync(3, retryAttempt => 
-            TimeSpan.FromSeconds(Math.Pow(2, retryAttempt))));
+// Add HttpClient
+services.AddHttpClient();
+
+// Add ApiClient
+services.AddScoped<IApiClient, ApiClient>();
 
 var serviceProvider = services.BuildServiceProvider();
 var apiClient = serviceProvider.GetRequiredService<IApiClient>();
@@ -140,7 +119,7 @@ public class UserService
 }
 ```
 
-### 2. POST Request with Custom JSON Options
+### 2. POST Request with Custom Configuration
 
 ```csharp
 public class ProductService
@@ -159,7 +138,24 @@ public class ProductService
             PropertyNameCaseInsensitive = true
         };
 
-        _apiClient = new ApiClient(httpClient, logger, jsonOptions);
+        // Custom retry pipeline with more aggressive retries
+        var retryOptions = new RetryStrategyOptions<HttpResponseMessage>
+        {
+            ShouldHandle = new PredicateBuilder<HttpResponseMessage>()
+                .Handle<HttpRequestException>()
+                .Handle<TaskCanceledException>()
+                .HandleResult(r => !r.IsSuccessStatusCode || r.StatusCode == HttpStatusCode.TooManyRequests),
+            MaxRetryAttempts = 5,
+            Delay = TimeSpan.FromSeconds(1),
+            BackoffType = DelayBackoffType.Exponential,
+            UseJitter = true
+        };
+
+        var retryPipeline = new ResiliencePipelineBuilder<HttpResponseMessage>()
+            .AddRetry(retryOptions)
+            .Build();
+
+        _apiClient = new ApiClient(httpClient, logger, jsonOptions, retryPipeline, disposeHttpClient: true);
     }
 
     public async Task<Product> CreateProductAsync(CreateProductRequest request, string apiKey)
@@ -183,7 +179,7 @@ public record CreateProductRequest(string Name, decimal Price, string Category);
 public record Product(int Id, string Name, decimal Price, string Category, DateTime CreatedAt);
 ```
 
-### 3. Advanced Configuration with Custom Policies
+### 3. Advanced Configuration with Multiple Resilience Strategies
 
 ```csharp
 public class ConfigurableApiClient
@@ -200,25 +196,54 @@ public class ConfigurableApiClient
         httpClient.DefaultRequestHeaders.Add("User-Agent", "MyApp/1.0");
         httpClient.DefaultRequestHeaders.Add("Accept-Language", "en-US");
 
-        // Custom retry policy with circuit breaker
-        var retryPolicy = Policy
-            .Handle<HttpRequestException>()
-            .Or<TaskCanceledException>()
-            .OrResult<HttpResponseMessage>(r => !r.IsSuccessStatusCode)
-            .CircuitBreakerAsync(
-                handledEventsAllowedBeforeBreaking: 3,
-                durationOfBreak: TimeSpan.FromSeconds(30))
-            .WrapAsync(
-                HttpPolicyExtensions
-                    .HandleTransientHttpError()
-                    .WaitAndRetryAsync(
-                        retryCount: config.RetryCount,
-                        sleepDurationProvider: retryAttempt => TimeSpan.FromSeconds(Math.Pow(2, retryAttempt)),
-                        onRetry: (outcome, timespan, retryCount, context) =>
-                        {
-                            logger.LogWarning("Retry {RetryCount} after {Delay}s for {Url}",
-                                retryCount, timespan.TotalSeconds, context.OperationKey);
-                        }));
+        // Build comprehensive resilience pipeline
+        var retryOptions = new RetryStrategyOptions<HttpResponseMessage>
+        {
+            ShouldHandle = new PredicateBuilder<HttpResponseMessage>()
+                .Handle<HttpRequestException>()
+                .Handle<TaskCanceledException>()
+                .HandleResult(r => !r.IsSuccessStatusCode && 
+                    (r.StatusCode == HttpStatusCode.TooManyRequests || 
+                     r.StatusCode >= HttpStatusCode.InternalServerError)),
+            MaxRetryAttempts = config.RetryCount,
+            Delay = TimeSpan.FromSeconds(1),
+            BackoffType = DelayBackoffType.Exponential,
+            UseJitter = true,
+            OnRetry = args =>
+            {
+                logger.LogWarning("Retry {AttemptNumber} after {Delay}ms due to {Exception}", 
+                    args.AttemptNumber, 
+                    args.RetryDelay.TotalMilliseconds,
+                    args.Outcome.Exception?.GetType().Name ?? args.Outcome.Result?.StatusCode.ToString());
+                return ValueTask.CompletedTask;
+            }
+        };
+
+        var circuitBreakerOptions = new CircuitBreakerStrategyOptions<HttpResponseMessage>
+        {
+            ShouldHandle = new PredicateBuilder<HttpResponseMessage>()
+                .Handle<HttpRequestException>()
+                .HandleResult(r => r.StatusCode >= HttpStatusCode.InternalServerError),
+            FailureRatio = 0.5,
+            SamplingDuration = TimeSpan.FromSeconds(30),
+            MinimumThroughput = 10,
+            BreakDuration = TimeSpan.FromSeconds(60),
+            OnOpened = args =>
+            {
+                logger.LogWarning("Circuit breaker opened");
+                return ValueTask.CompletedTask;
+            },
+            OnClosed = args =>
+            {
+                logger.LogInformation("Circuit breaker closed");
+                return ValueTask.CompletedTask;
+            }
+        };
+
+        var resiliencePipeline = new ResiliencePipelineBuilder<HttpResponseMessage>()
+            .AddRetry(retryOptions)
+            .AddCircuitBreaker(circuitBreakerOptions)
+            .Build();
 
         var jsonOptions = new JsonSerializerOptions
         {
@@ -227,7 +252,7 @@ public class ConfigurableApiClient
             PropertyNameCaseInsensitive = true
         };
 
-        return new ApiClient(httpClient, logger, jsonOptions, retryPolicy, true);
+        return new ApiClient(httpClient, logger, jsonOptions, resiliencePipeline, disposeHttpClient: true);
     }
 }
 
@@ -425,6 +450,9 @@ await apiClient.GetAsync<User>(url, credentials, AuthType.Basic);
 
 // API Key (X-API-Key header)
 await apiClient.GetAsync<User>(url, "your-secret-api-key", AuthType.ApiKey);
+
+// No authentication
+await apiClient.GetAsync<User>(url);
 ```
 
 ### Custom JSON Serialization
@@ -432,45 +460,70 @@ await apiClient.GetAsync<User>(url, "your-secret-api-key", AuthType.ApiKey);
 ```csharp
 var jsonOptions = new JsonSerializerOptions
 {
-    PropertyNamingPolicy = JsonNamingPolicy.CamelCase, // or SnakeCaseLower
+    PropertyNamingPolicy = JsonNamingPolicy.CamelCase, // Default behavior
     DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
     PropertyNameCaseInsensitive = true,
-    WriteIndented = true, // For debugging
+    WriteIndented = false, // Compact JSON for better performance
     Converters = { new JsonStringEnumConverter() } // Enum as strings
 };
 
 var apiClient = new ApiClient(httpClient, logger, jsonOptions);
 ```
 
-### Advanced Retry Policies
+### Advanced Resilience Pipelines with Polly v8
 
 ```csharp
-// Exponential backoff with jitter
-var retryPolicy = HttpPolicyExtensions
-    .HandleTransientHttpError()
-    .OrResult(msg => (int)msg.StatusCode == 429)
-    .WaitAndRetryAsync(
-        retryCount: 5,
-        sleepDurationProvider: retryAttempt =>
-        {
-            var baseDelay = TimeSpan.FromSeconds(Math.Pow(2, retryAttempt));
-            var jitter = TimeSpan.FromMilliseconds(Random.Shared.Next(0, 1000));
-            return baseDelay + jitter;
-        });
+// Simple retry with exponential backoff
+var retryOptions = new RetryStrategyOptions<HttpResponseMessage>
+{
+    MaxRetryAttempts = 3,
+    Delay = TimeSpan.FromSeconds(1),
+    BackoffType = DelayBackoffType.Exponential,
+    UseJitter = true
+};
+
+var retryPipeline = new ResiliencePipelineBuilder<HttpResponseMessage>()
+    .AddRetry(retryOptions)
+    .Build();
+
+// Advanced retry with custom conditions
+var advancedRetryOptions = new RetryStrategyOptions<HttpResponseMessage>
+{
+    ShouldHandle = new PredicateBuilder<HttpResponseMessage>()
+        .Handle<HttpRequestException>()
+        .Handle<TaskCanceledException>()
+        .HandleResult(r => !r.IsSuccessStatusCode || r.StatusCode == HttpStatusCode.TooManyRequests),
+    MaxRetryAttempts = 5,
+    Delay = TimeSpan.FromSeconds(2),
+    BackoffType = DelayBackoffType.Exponential,
+    UseJitter = true,
+    OnRetry = args =>
+    {
+        Console.WriteLine($"Retry {args.AttemptNumber} after {args.RetryDelay}");
+        return ValueTask.CompletedTask;
+    }
+};
 
 // Circuit breaker pattern
-var circuitBreakerPolicy = HttpPolicyExtensions
-    .HandleTransientHttpError()
-    .CircuitBreakerAsync(
-        handledEventsAllowedBeforeBreaking: 3,
-        durationOfBreak: TimeSpan.FromSeconds(30),
-        onBreak: (exception, duration) => 
-            Console.WriteLine($"Circuit breaker opened for {duration}"),
-        onReset: () => 
-            Console.WriteLine("Circuit breaker closed"));
+var circuitBreakerOptions = new CircuitBreakerStrategyOptions<HttpResponseMessage>
+{
+    ShouldHandle = new PredicateBuilder<HttpResponseMessage>()
+        .Handle<HttpRequestException>()
+        .HandleResult(r => r.StatusCode >= HttpStatusCode.InternalServerError),
+    FailureRatio = 0.3, // 30% failure rate
+    SamplingDuration = TimeSpan.FromSeconds(30),
+    MinimumThroughput = 10,
+    BreakDuration = TimeSpan.FromSeconds(60)
+};
 
-// Combine policies
-var combinedPolicy = Policy.WrapAsync(retryPolicy, circuitBreakerPolicy);
+// Combine multiple strategies
+var combinedPipeline = new ResiliencePipelineBuilder<HttpResponseMessage>()
+    .AddRetry(advancedRetryOptions)
+    .AddCircuitBreaker(circuitBreakerOptions)
+    .AddTimeout(TimeSpan.FromSeconds(30)) // Overall timeout
+    .Build();
+
+var apiClient = new ApiClient(httpClient, logger, jsonOptions, combinedPipeline);
 ```
 
 ## 🛡️ Error Handling
@@ -516,7 +569,7 @@ switch (response.StatusCode)
         // Refresh token or redirect to login
         break;
     case HttpStatusCode.TooManyRequests:
-        // Implement backoff
+        // Implement backoff (handled by retry policy)
         break;
     default:
         _logger.LogError("Unexpected error {StatusCode}: {Error}", 
@@ -535,16 +588,12 @@ public async Task<User> GetUserOrThrowAsync(int userId)
 }
 ```
 
-## 🔍 Logging Integration
+## 📝 Logging Integration
 
 The ApiClient integrates with Microsoft.Extensions.Logging for comprehensive request/response logging:
 
 ```csharp
-// Structured logging examples
-_logger.LogInformation("API request started for {Method} {Url}", method, url);
-_logger.LogWarning("API request failed with status {StatusCode}", response.StatusCode);
-_logger.LogError(exception, "Unexpected error during API request");
-
+// The ApiClient automatically logs errors during HTTP requests
 // Configure logging levels in appsettings.json
 {
     "Logging": {
@@ -565,20 +614,30 @@ _logger.LogError(exception, "Unexpected error during API request");
 public async Task GetAsync_Success_ReturnsData()
 {
     // Arrange
-    var mockHttpClient = new Mock<HttpClient>();
+    var mockHandler = new Mock<HttpMessageHandler>();
     var mockLogger = new Mock<ILogger<ApiClient>>();
-    var apiClient = new ApiClient(mockHttpClient.Object, mockLogger.Object);
     
-    // Setup mock response
-    var expectedUser = new User { Id = 1, Name = "Test User" };
-    // ... setup mock behavior
+    var expectedResponse = new HttpResponseMessage(HttpStatusCode.OK)
+    {
+        Content = new StringContent(JsonSerializer.Serialize(new User { Id = 1, Name = "Test User" }))
+    };
+    
+    mockHandler.Protected()
+        .Setup<Task<HttpResponseMessage>>(
+            "SendAsync",
+            ItExpr.IsAny<HttpRequestMessage>(),
+            ItExpr.IsAny<CancellationToken>())
+        .ReturnsAsync(expectedResponse);
+    
+    var httpClient = new HttpClient(mockHandler.Object);
+    var apiClient = new ApiClient(httpClient, mockLogger.Object, disposeHttpClient: true);
     
     // Act
     var result = await apiClient.GetAsync<User>(new Uri("https://api.test.com/users/1"));
     
     // Assert
     Assert.IsTrue(result.Success);
-    Assert.AreEqual(expectedUser.Name, result.Data!.Name);
+    Assert.AreEqual("Test User", result.Data!.Name);
 }
 ```
 
@@ -589,14 +648,13 @@ public async Task GetAsync_Success_ReturnsData()
 public class ApiClientIntegrationTests
 {
     private IApiClient _apiClient = null!;
-    private HttpClient _httpClient = null!;
 
     [SetUp]
     public void Setup()
     {
-        _httpClient = new HttpClient();
+        var httpClient = new HttpClient();
         var logger = new Mock<ILogger<ApiClient>>().Object;
-        _apiClient = new ApiClient(_httpClient, logger, disposeHttpClient: true);
+        _apiClient = new ApiClient(httpClient, logger, disposeHttpClient: true);
     }
 
     [Test]
@@ -622,17 +680,18 @@ public class ApiClientIntegrationTests
 
 ### Dependencies
 
-- **.NET Core 3.1+** or **.NET 5+**
+- **.NET 6+** (with nullable reference types support)
 - **System.Text.Json 8.0.0+**
-- **Microsoft.Extensions.Http.Polly 8.0.0+**
-- **Microsoft.Extensions.Logging 8.0.0+**
+- **Polly 8.6.2+**
+- **Polly.Core 8.6.2+**
+- **Microsoft.Extensions.Logging.Abstractions 9.0.0+**
 
 ### Performance Benefits
 
-- **System.Text.Json**: Up to 2x faster serialization compared to Newtonsoft.Json
-- **HTTP Connection Pooling**: Efficient connection reuse
-- **Async/Await**: Non-blocking I/O operations
-- **Built-in Retry Logic**: Reduces transient failure impact
+- **System.Text.Json**: High-performance JSON serialization
+- **HTTP Connection Pooling**: Efficient connection reuse through HttpClient
+- **Built-in Resilience**: Reduces transient failure impact with Polly v8
+- **Memory Efficiency**: Minimal allocations with modern .NET patterns
 
 ## 🤝 Contributing
 
@@ -642,22 +701,30 @@ public class ApiClientIntegrationTests
 4. Push to the branch (`git push origin feature/amazing-feature`)
 5. Open a Pull Request
 
-## 📝 License
+## 📄 License
 
 This project is licensed under the MIT License - see the LICENSE file for details.
 
-## 🔄 Version History
+## 📄 Version History
 
-### v2.0.0 (.NET Core/5+)
-- Migrated to System.Text.Json for improved performance
-- Added structured logging support with ILogger
-- Updated to modern Polly extensions
-- Improved error handling and status code reporting
-- Added comprehensive documentation and examples
-- Full async/await support with CancellationToken
+### v3.0.0 (Current - .NET 6+)
+- **Breaking Changes**: Migrated to Polly v8 with ResiliencePipeline
+- Updated to use modern Polly.Core instead of legacy Polly extensions
+- Improved nullable reference types support
+- Enhanced error handling and logging
+- Added proper resource disposal support
+- Simplified configuration with default retry strategies
+- Updated to latest System.Text.Json patterns
 
-### Migration from v1.0 (.NET Framework)
-- Replace Newtonsoft.Json with System.Text.Json
-- Update Polly policy creation using HttpPolicyExtensions
-- Add ILogger dependency injection support
-- Update JSON serialization options syntax
+### Migration from v2.0 (Polly v7)
+- Replace `IAsyncPolicy<HttpResponseMessage>` with `ResiliencePipeline<HttpResponseMessage>`
+- Update policy creation to use `ResiliencePipelineBuilder<T>` instead of `HttpPolicyExtensions`
+- Use new `RetryStrategyOptions` and `CircuitBreakerStrategyOptions` configuration
+- Replace callback delegates with `ValueTask`-returning delegates
+- Update exception handling predicates using `PredicateBuilder<T>`
+
+### Key Improvements in v3.0
+- **Better Performance**: Polly v8 offers significant performance improvements
+- **Modern Patterns**: Aligned with current .NET and Polly best practices
+- **Enhanced Configurability**: More granular control over resilience strategies
+- **Improved Diagnostics**: Better error reporting and logging integration

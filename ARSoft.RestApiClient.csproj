@@ -1,0 +1,44 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+	<GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+
+	  <!-- Metadados do pacote NuGet -->
+	  <PackageId>ARSoft.RestApiClient</PackageId>
+	  <Version>1.0.0</Version>
+	  <Authors>Alisson Santana</Authors>
+	  <Company>ARSoftware</Company>
+	  <Description>A modern, resilient HTTP API client library for .NET Core/5+ applications, providing clean async HTTP operations with built-in retry policies, comprehensive error handling, and structured logging support.	  </Description>
+	  <Copyright>Copyright © 2024 Alisson</Copyright>
+	  <PackageProjectUrl>https://github.com/alissonaero/ARSoft.RestApiClient</PackageProjectUrl>
+	  <RepositoryUrl>https://github.com/alissonaero/ARSoft.RestApiClient.git</RepositoryUrl>
+	  <RepositoryType>git</RepositoryType>
+	  <PackageTags>api rest httpclient polly json .net</PackageTags>
+	  <PackageReleaseNotes>
+		  Modern .NET Support: Built for .NET Core 3.1+ and .NET 5+
+		  System.Text.Json: High-performance JSON serialization (no Newtonsoft.Json dependency)
+		  Polly Integration: Built-in retry policies with exponential backoff using modern Polly extensions
+		  Structured Logging: ILogger integration for comprehensive request/response logging
+		  Multiple Auth Types: Bearer, Basic, and API Key authentication support
+		  Clean Architecture: SOLID principles with dependency injection support
+		  Comprehensive Error Handling: Detailed error responses with HTTP status codes
+		  Async/Await: Full asynchronous operation support with cancellation tokens
+	  </PackageReleaseNotes>
+	  <PackageLicenseExpression>MIT</PackageLicenseExpression>
+	  <PackageReadmeFile>readme.md</PackageReadmeFile>
+	  <PackageIcon>icon.png</PackageIcon>
+	  
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="9.0.8" />
+    <PackageReference Include="Polly" Version="8.6.2" />
+    <PackageReference Include="Polly.Core" Version="8.6.2" />
+	<None Include="icon.png" Pack="true" PackagePath="\" />
+	<None Include="readme.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
+</Project>

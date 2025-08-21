@@ -1,13 +1,13 @@
-﻿using System.Net;
+﻿using Microsoft.Extensions.Logging;
+using Polly;
+using Polly.Retry;
+using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using Microsoft.Extensions.Logging;
-using Polly;
-using Polly.Extensions.Http;
 
-namespace ARSoft.ApiClient;
+namespace ARSoft.RestApiClient;
 
 public enum AuthType
 {
@@ -38,17 +38,17 @@ public interface IApiClient
 public class ApiClient : IApiClient, IDisposable
 {
 	private readonly HttpClient _httpClient;
-	private readonly IAsyncPolicy<HttpResponseMessage> _retryPolicy;
+	private readonly ResiliencePipeline<HttpResponseMessage> _retryPipeline;
 	private readonly JsonSerializerOptions _jsonOptions;
 	private readonly ILogger<ApiClient>? _logger;
 	private readonly bool _disposeHttpClient;
 
-	public ApiClient(HttpClient httpClient, ILogger<ApiClient>? logger = null, JsonSerializerOptions? jsonOptions = null, IAsyncPolicy<HttpResponseMessage>? retryPolicy = null, bool disposeHttpClient = false)
+	public ApiClient(HttpClient httpClient, ILogger<ApiClient>? logger = null, JsonSerializerOptions? jsonOptions = null, ResiliencePipeline<HttpResponseMessage>? retryPipeline = null, bool disposeHttpClient = false)
 	{
 		_httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
 		_logger = logger;
 		_jsonOptions = jsonOptions ?? DefaultJsonOptions();
-		_retryPolicy = retryPolicy ?? CreateDefaultRetryPolicy();
+		_retryPipeline = retryPipeline ?? CreateDefaultRetryPipeline();
 		_disposeHttpClient = disposeHttpClient;
 	}
 
@@ -74,14 +74,14 @@ public class ApiClient : IApiClient, IDisposable
 
 		try
 		{
-			httpResponse = await _retryPolicy.ExecuteAsync(async () =>
+			httpResponse = await _retryPipeline.ExecuteAsync(async (ctx, token) =>
 			{
 				using var request = new HttpRequestMessage(method, url);
 				SetHeaders(request, authToken, authType);
 				SetContent(request, payload, method);
 
-				return await _httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
-			});
+				return await _httpClient.SendAsync(request, token).ConfigureAwait(false);
+			}, cancellationToken);
 
 			var responseJson = await httpResponse.Content.ReadAsStringAsync(cancellationToken);
 			result.StatusCode = httpResponse.StatusCode;
@@ -144,11 +144,24 @@ public class ApiClient : IApiClient, IDisposable
 		}
 	}
 
-	private static IAsyncPolicy<HttpResponseMessage> CreateDefaultRetryPolicy() =>
-			 HttpPolicyExtensions
-			.HandleTransientHttpError()
-			.OrResult(msg => (int)msg.StatusCode == 429)
-			.WaitAndRetryAsync(3, retryAttempt => TimeSpan.FromSeconds(Math.Pow(2, retryAttempt)));
+	private static ResiliencePipeline<HttpResponseMessage> CreateDefaultRetryPipeline()
+	{
+		var retryOptions = new RetryStrategyOptions<HttpResponseMessage>
+		{
+			ShouldHandle = new PredicateBuilder<HttpResponseMessage>()
+				.Handle<HttpRequestException>()
+				.Handle<TaskCanceledException>()
+				.HandleResult(r => !r.IsSuccessStatusCode || r.StatusCode == HttpStatusCode.TooManyRequests),
+			MaxRetryAttempts = 3,
+			Delay = TimeSpan.FromSeconds(1),
+			BackoffType = DelayBackoffType.Exponential,
+			UseJitter = true
+		};
+
+		return new ResiliencePipelineBuilder<HttpResponseMessage>()
+			.AddRetry(retryOptions)
+			.Build();
+	}
 
 	private static JsonSerializerOptions DefaultJsonOptions() => new()
 	{
