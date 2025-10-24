@@ -43,6 +43,19 @@ public class ApiClient : IApiClient, IDisposable
 	private readonly ILogger<ApiClient>? _logger;
 	private readonly bool _disposeHttpClient;
 
+	/// <summary>
+	/// Initializes a new instance of the <see cref="ApiClient"/> class with the specified HTTP client, logger, JSON
+	/// serializer options, and retry pipeline.
+	/// </summary>
+	/// <param name="httpClient">The <see cref="HttpClient"/> instance used to send HTTP requests. This parameter cannot be <see langword="null"/>.</param>
+	/// <param name="logger">An optional logger for logging API client operations. If <see langword="null"/>, logging is disabled.</param>
+	/// <param name="jsonOptions">Optional JSON serializer options for customizing JSON serialization and deserialization. If <see langword="null"/>,
+	/// default options are used.</param>
+	/// <param name="retryPipeline">An optional resilience pipeline for handling retries of HTTP requests. If <see langword="null"/>, a default retry
+	/// pipeline is used.</param>
+	/// <param name="disposeHttpClient">A value indicating whether the <see cref="HttpClient"/> should be disposed when the <see cref="ApiClient"/> is
+	/// disposed. <see langword="true"/> to dispose the <see cref="HttpClient"/>; otherwise, <see langword="false"/>.</param>
+	/// <exception cref="ArgumentNullException">Thrown if <paramref name="httpClient"/> is <see langword="null"/>.</exception>
 	public ApiClient(HttpClient httpClient, ILogger<ApiClient>? logger = null, JsonSerializerOptions? jsonOptions = null, ResiliencePipeline<HttpResponseMessage>? retryPipeline = null, bool disposeHttpClient = false)
 	{
 		_httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
@@ -163,9 +176,10 @@ public class ApiClient : IApiClient, IDisposable
 			.Build();
 	}
 
-	private static JsonSerializerOptions DefaultJsonOptions() => new()
+	private static JsonSerializerOptions DefaultJsonOptions() => new(JsonSerializerDefaults.Web)
 	{
-		PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+		PropertyNamingPolicy = null,
+		PropertyNameCaseInsensitive = true,
 		DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
 		WriteIndented = false
 	};
