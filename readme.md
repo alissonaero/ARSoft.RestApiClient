@@ -707,10 +707,10 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 ## 📄 Version History
 
-### v3.0.1 (Current - .NET 6+)
+### v3.0.4 (Current - .NET 6+)
 - JsonSerializerOptions default settings improved to suit most use cases
 - Constructor summary comments added for better IntelliSense support
-- 
+
 ### v3.0.0  
 - **Breaking Changes**: Migrated to Polly v8 with ResiliencePipeline
 - Updated to use modern Polly.Core instead of legacy Polly extensions
