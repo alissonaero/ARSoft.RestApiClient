@@ -732,3 +732,81 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 - **Modern Patterns**: Aligned with current .NET and Polly best practices
 - **Enhanced Configurability**: More granular control over resilience strategies
 - **Improved Diagnostics**: Better error reporting and logging integration
+
+
+## 🆕 New in v4.0
+
+### Major Architectural Changes
+The `ApiClient` has been fully refactored in **v4.0** to ensure safer, cleaner, and more predictable usage patterns while improving thread-safety and encapsulation.
+
+#### 🧱 Key Changes
+- **Internal HttpClient Management**: The library now manages its own shared `HttpClient` instance. Consumers no longer pass or dispose `HttpClient` objects.
+- **Thread-Safe Shared Instance**: A single internal `HttpClient` is reused across all calls and instances, preventing socket exhaustion and enabling high concurrency.
+- **Configuration Validation**: Attempts to modify critical configuration after the first request (like `BaseAddress`, `Timeout`, or `DefaultRequestHeaders`) now throw a specific `ApiClientConfigurationException`.
+- **Safer Disposal**: Disposing an `ApiClient` no longer disposes the shared `HttpClient` (avoids breaking other in-flight requests).
+- **Improved Concurrency**: All requests are now explicitly isolated and thread-safe through independent `HttpRequestMessage` and deserialization streams.
+
+#### ⚙️ Configuration Restrictions
+To maintain stability, certain configuration changes are only allowed before the first request:
+- `SetBaseAddress(Uri baseAddress)`
+- `SetTimeout(TimeSpan timeout)`
+- `AddDefaultRequestHeader(string name, string value)`
+
+If called after any request has been sent, an `ApiClientConfigurationException` will be raised with one of the following reasons:
+```csharp
+public enum ApiClientConfigurationReason
+{
+    HeadersModificationNotAllowed,
+    BaseAddressModificationNotAllowed,
+    TimeoutModificationNotAllowed,
+    ClientDisposed
+}
+```
+
+#### 🚀 Updated Usage Example
+```csharp
+var apiClient = new ApiClient(
+    baseAddress: new Uri("https://api.example.com"),
+    timeout: TimeSpan.FromSeconds(60),
+    logger: loggerInstance);
+
+// Optional configuration before first request
+apiClient.AddDefaultRequestHeader("User-Agent", "MyApp/1.0");
+
+// Safe concurrent requests
+var task1 = apiClient.GetAsync<User>(new Uri("users/1", UriKind.Relative));
+var task2 = apiClient.PostAsync<CreateUserRequest, User>(new Uri("users", UriKind.Relative), new CreateUserRequest("Alice"));
+await Task.WhenAll(task1, task2);
+```
+
+#### 🧩 Exception Example
+```csharp
+try
+{
+    var client = new ApiClient(new Uri("https://api.service.com"));
+    await client.GetAsync<object>(); // After this, configuration is locked.
+    client.SetTimeout(TimeSpan.FromSeconds(10)); // Throws ApiClientConfigurationException
+}
+catch (ApiClientConfigurationException ex)
+{
+    Console.WriteLine($"Configuration change not allowed: {ex.Reason} - {ex.Message}");
+}
+```
+
+#### ✅ Benefits
+- No more `HttpClient` leaks or lifetime confusion
+- Safe for parallel requests across threads
+- Predictable configuration lifecycle
+- Clear and specific exception handling for misuse
+
+---
+
+### v4.0.0 (Upcoming / Current Refactor)
+- **Breaking Change**: Removed constructor parameter for external `HttpClient`
+- Added internal shared `HttpClient` managed by library
+- Added `ApiClientConfigurationException` for post-start configuration changes
+- Improved concurrency and memory safety
+- Enhanced XML documentation for all public members
+- Internal locking for thread-safe configuration state
+- Disposing `ApiClient` no longer disposes `HttpClient`
+
