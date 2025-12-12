@@ -6,7 +6,6 @@ using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using System.Threading;
 
 namespace ARSoft.RestApiClient;
 
@@ -80,15 +79,11 @@ public enum ApiClientConfigurationReason
 /// <summary>
 /// Exception thrown when ApiClient configuration changes are attempted after use.
 /// </summary>
-public class ApiClientConfigurationException : InvalidOperationException
+/// <remarks>Initializes a new instance of the ApiClientConfigurationException class.</remarks>
+public class ApiClientConfigurationException(ApiClientConfigurationReason reason, string message) : InvalidOperationException(message)
 {
 	/// <summary>The reason why configuration is not allowed.</summary>
-	public ApiClientConfigurationReason Reason { get; }
-	/// <summary>Initializes a new instance of the ApiClientConfigurationException class.</summary>
-	public ApiClientConfigurationException(ApiClientConfigurationReason reason, string message) : base(message)
-	{
-		Reason = reason;
-	}
+	public ApiClientConfigurationReason Reason { get; } = reason;
 }
 
 /// <summary>
@@ -138,7 +133,7 @@ public sealed class ApiClient : IApiClient, IDisposable
 		{
 			if (_hasSentRequests)
 				throw new ApiClientConfigurationException(ApiClientConfigurationReason.HeadersModificationNotAllowed, $"Cannot modify DefaultRequestHeaders after sending requests.");
-			
+
 			if (_sharedHttpClient.DefaultRequestHeaders.Contains(name))
 				_sharedHttpClient.DefaultRequestHeaders.Remove(name);
 
@@ -221,7 +216,7 @@ public sealed class ApiClient : IApiClient, IDisposable
 			}, cancellationToken).ConfigureAwait(false);
 
 			result.StatusCode = httpResponse.StatusCode;
-			
+
 			if (!httpResponse.IsSuccessStatusCode)
 			{
 				result.Success = false;

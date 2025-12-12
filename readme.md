@@ -734,10 +734,10 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 - **Improved Diagnostics**: Better error reporting and logging integration
 
 
-## 🆕 New in v4.0
+ 
 
 ### Major Architectural Changes
-The `ApiClient` has been fully refactored in **v4.0** to ensure safer, cleaner, and more predictable usage patterns while improving thread-safety and encapsulation.
+The `ApiClient` has been fully refactored in **v3.1.1** to ensure safer, cleaner, and more predictable usage patterns while improving thread-safety and encapsulation.
 
 #### 🧱 Key Changes
 - **Internal HttpClient Management**: The library now manages its own shared `HttpClient` instance. Consumers no longer pass or dispose `HttpClient` objects.
@@ -801,7 +801,7 @@ catch (ApiClientConfigurationException ex)
 
 ---
 
-### v4.0.0 (Upcoming / Current Refactor)
+### v3.1.1 (Upcoming / Current Refactor)
 - **Breaking Change**: Removed constructor parameter for external `HttpClient`
 - Added internal shared `HttpClient` managed by library
 - Added `ApiClientConfigurationException` for post-start configuration changes
@@ -809,4 +809,3 @@ catch (ApiClientConfigurationException ex)
 - Enhanced XML documentation for all public members
 - Internal locking for thread-safe configuration state
 - Disposing `ApiClient` no longer disposes `HttpClient`
-
