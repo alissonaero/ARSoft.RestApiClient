@@ -7,7 +7,7 @@ A modern, resilient HTTP API client library for .NET Core and .NET 5+ applicatio
 - **Modern .NET Support**: Built for .NET 6+ with nullable reference types
 - **Polly v8 Integration**: Built-in resilience pipelines with exponential backoff and jitter
 - **Structured Logging**: ILogger integration for comprehensive request/response logging
-- **Multiple Auth Types**: Bearer, Basic, and API Key authentication support
+- **Flexible Authentication**: Bearer, Basic, API Key, and Custom authentication support
 - **Clean Architecture**: SOLID principles with dependency injection support
 - **Comprehensive Error Handling**: Detailed error responses with HTTP status codes
 - **Async/Await**: Full asynchronous operation support with cancellation tokens
@@ -105,7 +105,7 @@ public class UserService
             new Uri("https://api.example.com/users"),
             bearerToken,
             AuthType.Bearer,
-            cancellationToken);
+            cancellationToken: cancellationToken);
 
         if (response.Success)
         {
@@ -119,7 +119,91 @@ public class UserService
 }
 ```
 
-### 2. POST Request with Custom Configuration
+### 2. Custom Authentication for Non-Standard APIs
+
+```csharp
+public class CustomApiService
+{
+    private readonly IApiClient _apiClient;
+    private readonly ILogger<CustomApiService> _logger;
+
+    public CustomApiService(IApiClient apiClient, ILogger<CustomApiService> logger)
+    {
+        _apiClient = apiClient;
+        _logger = logger;
+    }
+
+    // Example 1: API that uses "token" header instead of "Authorization"
+    public async Task<PaymentResponse> ProcessPaymentAsync(PaymentRequest request, string token)
+    {
+        var customAuth = new CustomAuthInfo
+        {
+            HeaderName = "token",
+            HeaderValue = token
+        };
+
+        var response = await _apiClient.PostAsync<PaymentRequest, PaymentResponse>(
+            new Uri("https://api.payment-gateway.com/v1/payments"),
+            request,
+            authToken: null,
+            AuthType.Custom,
+            customAuth);
+
+        if (!response.Success)
+        {
+            _logger.LogError("Payment processing failed: {Error}", response.ErrorMessage);
+            throw new InvalidOperationException($"Payment failed: {response.ErrorMessage}");
+        }
+
+        return response.Data!;
+    }
+
+    // Example 2: API that uses "X-Merchant-Key" header
+    public async Task<MerchantData> GetMerchantDataAsync(string merchantKey)
+    {
+        var customAuth = new CustomAuthInfo
+        {
+            HeaderName = "X-Merchant-Key",
+            HeaderValue = merchantKey
+        };
+
+        var response = await _apiClient.GetAsync<MerchantData>(
+            new Uri("https://api.merchant-service.com/merchant/info"),
+            authToken: null,
+            AuthType.Custom,
+            customAuth);
+
+        return response.Success 
+            ? response.Data! 
+            : throw new HttpRequestException($"Failed to retrieve merchant data: {response.ErrorMessage}");
+    }
+
+    // Example 3: API that requires custom authentication header
+    public async Task<OrderStatus> CheckOrderStatusAsync(string orderId, string apiSecret)
+    {
+        var customAuth = new CustomAuthInfo
+        {
+            HeaderName = "X-API-Secret",
+            HeaderValue = apiSecret
+        };
+
+        var response = await _apiClient.GetAsync<OrderStatus>(
+            new Uri($"https://api.orders.com/status/{orderId}"),
+            authToken: null,
+            AuthType.Custom,
+            customAuth);
+
+        return response.Data!;
+    }
+}
+
+public record PaymentRequest(decimal Amount, string Currency, string CardToken);
+public record PaymentResponse(string TransactionId, string Status, DateTime ProcessedAt);
+public record MerchantData(string Id, string Name, bool IsActive);
+public record OrderStatus(string OrderId, string Status, DateTime UpdatedAt);
+```
+
+### 3. POST Request with Standard Configuration
 
 ```csharp
 public class ProductService
@@ -179,7 +263,7 @@ public record CreateProductRequest(string Name, decimal Price, string Category);
 public record Product(int Id, string Name, decimal Price, string Category, DateTime CreatedAt);
 ```
 
-### 3. Advanced Configuration with Multiple Resilience Strategies
+### 4. Advanced Configuration with Multiple Resilience Strategies
 
 ```csharp
 public class ConfigurableApiClient
@@ -265,7 +349,7 @@ public record ApiClientConfig
 }
 ```
 
-### 4. ASP.NET Core Web API Integration
+### 5. ASP.NET Core Web API Integration
 
 ```csharp
 [ApiController]
@@ -292,7 +376,7 @@ public class UsersController : ControllerBase
                 new Uri("https://external-api.com/users"),
                 authToken,
                 AuthType.Bearer,
-                cancellationToken);
+                cancellationToken: cancellationToken);
 
             if (response.Success)
             {
@@ -331,7 +415,7 @@ public class UsersController : ControllerBase
                 request,
                 authToken,
                 AuthType.Bearer,
-                cancellationToken);
+                cancellationToken: cancellationToken);
 
             if (response.Success)
             {
@@ -349,7 +433,7 @@ public class UsersController : ControllerBase
 }
 ```
 
-### 5. Background Service with Periodic API Calls
+### 6. Background Service with Periodic API Calls
 
 ```csharp
 public class DataSyncBackgroundService : BackgroundService
@@ -413,7 +497,7 @@ public class DataSyncBackgroundService : BackgroundService
                 new Uri($"https://api.example.com/{endpoint}"),
                 apiKey,
                 AuthType.ApiKey,
-                cancellationToken);
+                cancellationToken: cancellationToken);
 
             if (response.Success)
             {
@@ -436,7 +520,7 @@ public class DataSyncBackgroundService : BackgroundService
 builder.Services.AddHostedService<DataSyncBackgroundService>();
 ```
 
-## 🔧 Configuration Options
+## 📧 Configuration Options
 
 ### Authentication Types
 
@@ -450,6 +534,22 @@ await apiClient.GetAsync<User>(url, credentials, AuthType.Basic);
 
 // API Key (X-API-Key header)
 await apiClient.GetAsync<User>(url, "your-secret-api-key", AuthType.ApiKey);
+
+// Custom Authentication (for APIs with non-standard header names)
+var customAuth = new CustomAuthInfo
+{
+    HeaderName = "token",
+    HeaderValue = "your-custom-token-value"
+};
+await apiClient.GetAsync<User>(url, authToken: null, AuthType.Custom, customAuth);
+
+// Another custom example (API key with custom header)
+var customApiKey = new CustomAuthInfo
+{
+    HeaderName = "X-Custom-API-Key",
+    HeaderValue = "sk_live_abc123xyz"
+};
+await apiClient.PostAsync<Request, Response>(url, payload, authToken: null, AuthType.Custom, customApiKey);
 
 // No authentication
 await apiClient.GetAsync<User>(url);
@@ -588,7 +688,7 @@ public async Task<User> GetUserOrThrowAsync(int userId)
 }
 ```
 
-## 📝 Logging Integration
+## 🔍 Logging Integration
 
 The ApiClient integrates with Microsoft.Extensions.Logging for comprehensive request/response logging:
 
@@ -707,7 +807,13 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 ## 📄 Version History
 
-### v3.0.4 (Current - .NET 6+)
+### v3.1.0 (Current - .NET 6+)
+- **New Feature**: Custom authentication type support for APIs with non-standard header requirements
+- Added `CustomAuthInfo` record for flexible header configuration
+- Enhanced authentication flexibility to support APIs that use custom headers like "token", "X-Custom-API-Key", etc.
+- Improved parameter validation for Custom auth type
+
+### v3.0.4
 - JsonSerializerOptions default settings improved to suit most use cases
 - Constructor summary comments added for better IntelliSense support
 

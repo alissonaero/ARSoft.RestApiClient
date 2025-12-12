@@ -2,7 +2,6 @@
 using Polly;
 using Polly.Retry;
 using System.Net;
-using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
@@ -15,7 +14,14 @@ public enum AuthType
 	None,
 	Bearer,
 	Basic,
-	ApiKey
+	ApiKey,
+	Custom
+}
+
+public record CustomAuthInfo
+{
+	public string HeaderName { get; init; } = string.Empty;
+	public string HeaderValue { get; init; } = string.Empty;
 }
 
 public class ApiResponse<T>
@@ -29,12 +35,12 @@ public class ApiResponse<T>
 
 public interface IApiClient
 {
-	Task<ApiResponse<TResponse>> GetAsync<TResponse>(Uri url, string? authToken = null, AuthType authType = AuthType.None, CancellationToken cancellationToken = default);
-	Task<ApiResponse<TResponse>> GetAsync<TResponse>(string? authToken = null, AuthType authType = AuthType.None, CancellationToken cancellationToken = default);
-	Task<ApiResponse<TResponse>> PostAsync<TRequest, TResponse>(Uri url, TRequest payload, string? authToken = null, AuthType authType = AuthType.None, CancellationToken cancellationToken = default);
-	Task<ApiResponse<TResponse>> PutAsync<TRequest, TResponse>(Uri url, TRequest payload, string? authToken = null, AuthType authType = AuthType.None, CancellationToken cancellationToken = default);
-	Task<ApiResponse<TResponse>> DeleteAsync<TResponse>(Uri url, string? authToken = null, AuthType authType = AuthType.None, CancellationToken cancellationToken = default);
-	Task<ApiResponse<TResponse>> PatchAsync<TRequest, TResponse>(Uri url, TRequest payload, string? authToken = null, AuthType authType = AuthType.None, CancellationToken cancellationToken = default);
+	Task<ApiResponse<TResponse>> GetAsync<TResponse>(Uri url, string? authToken = null, AuthType authType = AuthType.None, CustomAuthInfo? customAuth = null, CancellationToken cancellationToken = default);
+	Task<ApiResponse<TResponse>> GetAsync<TResponse>(string? authToken = null, AuthType authType = AuthType.None, CustomAuthInfo? customAuth = null, CancellationToken cancellationToken = default);
+	Task<ApiResponse<TResponse>> PostAsync<TRequest, TResponse>(Uri url, TRequest payload, string? authToken = null, AuthType authType = AuthType.None, CustomAuthInfo? customAuth = null, CancellationToken cancellationToken = default);
+	Task<ApiResponse<TResponse>> PutAsync<TRequest, TResponse>(Uri url, TRequest payload, string? authToken = null, AuthType authType = AuthType.None, CustomAuthInfo? customAuth = null, CancellationToken cancellationToken = default);
+	Task<ApiResponse<TResponse>> DeleteAsync<TResponse>(Uri url, string? authToken = null, AuthType authType = AuthType.None, CustomAuthInfo? customAuth = null, CancellationToken cancellationToken = default);
+	Task<ApiResponse<TResponse>> PatchAsync<TRequest, TResponse>(Uri url, TRequest payload, string? authToken = null, AuthType authType = AuthType.None, CustomAuthInfo? customAuth = null, CancellationToken cancellationToken = default);
 }
 
 /// <summary>
@@ -58,25 +64,25 @@ public class ApiClient(HttpClient httpClient, ILogger<ApiClient>? logger = null,
 	private readonly ILogger<ApiClient>? _logger = logger;
 	private readonly bool _disposeHttpClient = disposeHttpClient;
 
-	public async Task<ApiResponse<TResponse>> GetAsync<TResponse>(Uri url, string? authToken = null, AuthType authType = AuthType.None, CancellationToken cancellationToken = default) =>
-		await SendAsync<object, TResponse>(HttpMethod.Get, url, null, authToken, authType, cancellationToken).ConfigureAwait(false);
+	public async Task<ApiResponse<TResponse>> GetAsync<TResponse>(Uri url, string? authToken = null, AuthType authType = AuthType.None, CustomAuthInfo? customAuth = null, CancellationToken cancellationToken = default) =>
+		await SendAsync<object, TResponse>(HttpMethod.Get, url, null, authToken, authType, customAuth!, cancellationToken).ConfigureAwait(false);
 
-	public async Task<ApiResponse<TResponse>> GetAsync<TResponse>(string? authToken = null, AuthType authType = AuthType.None, CancellationToken cancellationToken = default) =>
-		   await SendAsync<object, TResponse>(HttpMethod.Get, _httpClient.BaseAddress ?? throw new Exception("Essa assinatura exige que o Base Address seja definido no cliente"), null, authToken, authType, cancellationToken).ConfigureAwait(false);
+	public async Task<ApiResponse<TResponse>> GetAsync<TResponse>(string? authToken = null, AuthType authType = AuthType.None, CustomAuthInfo? customAuth = null, CancellationToken cancellationToken = default) =>
+		   await SendAsync<object, TResponse>(HttpMethod.Get, _httpClient.BaseAddress ?? throw new Exception("Essa assinatura exige que o Base Address seja definido no cliente"), null, authToken, authType, customAuth!, cancellationToken).ConfigureAwait(false);
 
-	public async Task<ApiResponse<TResponse>> PostAsync<TRequest, TResponse>(Uri url, TRequest payload, string? authToken = null, AuthType authType = AuthType.None, CancellationToken cancellationToken = default) =>
-		await SendAsync<TRequest, TResponse>(HttpMethod.Post, url, payload, authToken, authType, cancellationToken).ConfigureAwait(false);
+	public async Task<ApiResponse<TResponse>> PostAsync<TRequest, TResponse>(Uri url, TRequest payload, string? authToken = null, AuthType authType = AuthType.None, CustomAuthInfo? customAuth = null, CancellationToken cancellationToken = default) =>
+		await SendAsync<TRequest, TResponse>(HttpMethod.Post, url, payload, authToken, authType, customAuth!, cancellationToken).ConfigureAwait(false);
 
-	public async Task<ApiResponse<TResponse>> PutAsync<TRequest, TResponse>(Uri url, TRequest payload, string? authToken = null, AuthType authType = AuthType.None, CancellationToken cancellationToken = default) =>
-		await SendAsync<TRequest, TResponse>(HttpMethod.Put, url, payload, authToken, authType, cancellationToken).ConfigureAwait(false);
+	public async Task<ApiResponse<TResponse>> PutAsync<TRequest, TResponse>(Uri url, TRequest payload, string? authToken = null, AuthType authType = AuthType.None, CustomAuthInfo? customAuth = null, CancellationToken cancellationToken = default) =>
+		await SendAsync<TRequest, TResponse>(HttpMethod.Put, url, payload, authToken, authType, customAuth!, cancellationToken).ConfigureAwait(false);
 
-	public async Task<ApiResponse<TResponse>> DeleteAsync<TResponse>(Uri url, string? authToken = null, AuthType authType = AuthType.None, CancellationToken cancellationToken = default) =>
-		await SendAsync<object, TResponse>(HttpMethod.Delete, url, null, authToken, authType, cancellationToken).ConfigureAwait(false);
+	public async Task<ApiResponse<TResponse>> DeleteAsync<TResponse>(Uri url, string? authToken = null, AuthType authType = AuthType.None, CustomAuthInfo? customAuth = null, CancellationToken cancellationToken = default) =>
+		await SendAsync<object, TResponse>(HttpMethod.Delete, url, null, authToken, authType, customAuth!, cancellationToken).ConfigureAwait(false);
 
-	public async Task<ApiResponse<TResponse>> PatchAsync<TRequest, TResponse>(Uri url, TRequest payload, string? authToken = null, AuthType authType = AuthType.None, CancellationToken cancellationToken = default) =>
-		await SendAsync<TRequest, TResponse>(HttpMethod.Patch, url, payload, authToken, authType, cancellationToken).ConfigureAwait(false);
+	public async Task<ApiResponse<TResponse>> PatchAsync<TRequest, TResponse>(Uri url, TRequest payload, string? authToken = null, AuthType authType = AuthType.None, CustomAuthInfo? customAuth = null, CancellationToken cancellationToken = default) =>
+		await SendAsync<TRequest, TResponse>(HttpMethod.Patch, url, payload, authToken, authType, customAuth!, cancellationToken).ConfigureAwait(false);
 
-	private async Task<ApiResponse<TResponse>> SendAsync<TRequest, TResponse>(HttpMethod method, Uri url, TRequest? payload, string? authToken, AuthType authType, CancellationToken cancellationToken)
+	private async Task<ApiResponse<TResponse>> SendAsync<TRequest, TResponse>(HttpMethod method, Uri url, TRequest? payload, string? authToken, AuthType authType, CustomAuthInfo customAuth, CancellationToken cancellationToken)
 	{
 		var result = new ApiResponse<TResponse>();
 		HttpResponseMessage? httpResponse = null;
@@ -87,10 +93,10 @@ public class ApiClient(HttpClient httpClient, ILogger<ApiClient>? logger = null,
 			{
 				// Create the request inside the lambda so it matches the retry execution per attempt
 				using var request = new HttpRequestMessage(method, url);
-				SetHeaders(request, authToken, authType);
+				SetHeaders(request, authToken, authType, customAuth);
 				SetContent(request, payload, method);
 
-				// Important: ResponseHeadersRead avoids buffering the whole body before we start reading.
+				// ResponseHeadersRead avoids buffering the whole body before we start reading.
 				return await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token).ConfigureAwait(false);
 			}, cancellationToken).ConfigureAwait(false);
 
@@ -143,7 +149,7 @@ public class ApiClient(HttpClient httpClient, ILogger<ApiClient>? logger = null,
 		return result;
 	}
 
-	private void SetHeaders(HttpRequestMessage request, string? authToken, AuthType authType)
+	private static void SetHeaders(HttpRequestMessage request, string? authToken, AuthType authType, CustomAuthInfo customAuthInfo)
 	{
 		// Ensure single Accept header
 		request.Headers.Accept.Clear();
@@ -163,6 +169,22 @@ public class ApiClient(HttpClient httpClient, ILogger<ApiClient>? logger = null,
 					request.Headers.Remove("X-API-Key");
 					request.Headers.Add("X-API-Key", authToken);
 					break;
+				case AuthType.Custom:
+					if (customAuthInfo == null)
+					{
+						throw new ArgumentNullException(nameof(customAuthInfo), "CustomAuthInfo must be provided for Custom auth type.");
+					}
+
+					if (!string.IsNullOrWhiteSpace(customAuthInfo.HeaderName) && !string.IsNullOrWhiteSpace(customAuthInfo.HeaderValue))
+					{
+						if (request.Headers.Contains(customAuthInfo.HeaderName))
+						{
+							request.Headers.Remove(customAuthInfo.HeaderName);
+						}
+						request.Headers.Add(customAuthInfo.HeaderName, customAuthInfo.HeaderValue);
+					}
+					break;
+
 			}
 		}
 	}
