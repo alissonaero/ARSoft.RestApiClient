@@ -5,13 +5,18 @@ A modern, resilient HTTP API client library for .NET Core and .NET 5+ applicatio
 ## 🎯 Features
 
 - **Modern .NET Support**: Built for .NET 6+ with nullable reference types
-- **Polly v8 Integration**: Built-in resilience pipelines with exponential backoff and jitter
+- **Polly v8 Integration**: Flexible resilience pipelines with exponential backoff and jitter
+- **Per-Instance HttpClient**: Each ApiClient manages its own HttpClient for isolated configuration
 - **Structured Logging**: ILogger integration for comprehensive request/response logging
-- **Multiple Auth Types**: Bearer, Basic, and API Key authentication support
+- **Flexible Authentication**: Bearer, Basic, and API Key authentication support
+- **Custom Headers Support**: Add dynamic headers per request or globally
+- **Thread-Safe Design**: Proper concurrency handling with internal locking
 - **Clean Architecture**: SOLID principles with dependency injection support
-- **Comprehensive Error Handling**: Detailed error responses with HTTP status codes
+- **Comprehensive Error Handling**: Detailed error responses with HTTP status codes and timeout detection
 - **Async/Await**: Full asynchronous operation support with cancellation tokens
-- **Resource Management**: Proper disposal support with optional HttpClient disposal
+- **Configuration Validation**: Prevents unsafe configuration changes after initialization
+- **Relative Path Support**: Built-in support for relative URLs with BaseAddress configuration
+- **Streaming Performance**: Efficient JSON deserialization using Newtonsoft.Json with streaming
 
 ## 🚀 Quick Start
 
@@ -21,71 +26,51 @@ Add to your project via NuGet Package Manager or .csproj:
 
 ```xml
 <PackageReference Include="Polly.Core" Version="8.6.2" />
-<PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="9.0.8" />
+<PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="9.0.0" />
+<PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
 ```
 
-## 📖 Dependency Injection Setup
+## 📖 Basic Usage
 
-### ASP.NET Core Integration
+### Simple Setup
 
 ```csharp
-// Program.cs
-builder.Services.AddHttpClient<IApiClient, ApiClient>();
+// Create client with base address
+var apiClient = new ApiClient(
+    baseAddress: new Uri("https://api.example.com"),
+    timeout: TimeSpan.FromSeconds(30));
 
-// Custom configuration
-builder.Services.AddScoped<IApiClient>(provider =>
+// Make requests using relative paths
+var response = await apiClient.GetAsync<User>("users/1");
+if (response.Success)
 {
-    var httpClient = provider.GetRequiredService<HttpClient>();
-    var logger = provider.GetRequiredService<ILogger<ApiClient>>();
-    
-    // Optional: Custom JSON options
-    var jsonOptions = new JsonSerializerOptions
-    {
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
-    };
-    
-    // Optional: Custom retry pipeline
-    var retryOptions = new RetryStrategyOptions<HttpResponseMessage>
-    {
-        MaxRetryAttempts = 5,
-        Delay = TimeSpan.FromSeconds(2),
-        BackoffType = DelayBackoffType.Exponential,
-        UseJitter = true
-    };
-    
-    var retryPipeline = new ResiliencePipelineBuilder<HttpResponseMessage>()
-        .AddRetry(retryOptions)
-        .Build();
-    
-    return new ApiClient(httpClient, logger, jsonOptions, retryPipeline);
-});
+    Console.WriteLine($"User: {response.Data.Name}");
+}
 ```
 
-### Console Application Setup
+### Dependency Injection Setup
 
 ```csharp
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging;
-
-var services = new ServiceCollection();
-
-// Add logging
-services.AddLogging(builder => builder.AddConsole());
-
-// Add HttpClient
-services.AddHttpClient();
-
-// Add ApiClient
-services.AddScoped<IApiClient, ApiClient>();
-
-var serviceProvider = services.BuildServiceProvider();
-var apiClient = serviceProvider.GetRequiredService<IApiClient>();
+// Program.cs - ASP.NET Core
+builder.Services.AddSingleton<IApiClient>(sp =>
+{
+    var logger = sp.GetRequiredService<ILogger<ApiClient>>();
+    var client = new ApiClient(
+        baseAddress: new Uri("https://api.example.com"),
+        timeout: TimeSpan.FromSeconds(60),
+        logger: logger);
+    
+    // Add default headers before first use
+    client.AddDefaultRequestHeader("User-Agent", "MyApp/1.0");
+    client.AddDefaultRequestHeader("Accept-Language", "en-US");
+    
+    return client;
+});
 ```
 
 ## 📋 Detailed Examples
 
-### 1. GET Request with Authentication
+### 1. GET Request with Relative Paths
 
 ```csharp
 public class UserService
@@ -101,11 +86,12 @@ public class UserService
 
     public async Task<List<User>> GetUsersAsync(string bearerToken, CancellationToken cancellationToken = default)
     {
+        // Using relative path with configured BaseAddress
         var response = await _apiClient.GetAsync<List<User>>(
-            new Uri("https://api.example.com/users"),
-            bearerToken,
-            AuthType.Bearer,
-            cancellationToken);
+            "users",
+            authToken: bearerToken,
+            authType: AuthType.Bearer,
+            cancellationToken: cancellationToken);
 
         if (response.Success)
         {
@@ -116,324 +102,211 @@ public class UserService
         _logger.LogError("Failed to retrieve users: {Error}", response.ErrorMessage);
         throw new HttpRequestException($"Failed to get users: {response.ErrorMessage}");
     }
+
+    public async Task<User> GetUserByIdAsync(int userId)
+    {
+        // Absolute URI also supported
+        var response = await _apiClient.GetAsync<User>(
+            new Uri($"https://api.example.com/users/{userId}"));
+
+        return response.Data!;
+    }
 }
 ```
 
-### 2. POST Request with Custom Configuration
+### 2. Using Custom Headers Per Request
 
 ```csharp
-public class ProductService
+public class ApiService
 {
     private readonly IApiClient _apiClient;
 
-    public ProductService(ILogger<ApiClient> logger)
+    public ApiService(IApiClient apiClient)
     {
-        var httpClient = new HttpClient();
-        
-        // Custom JSON options
-        var jsonOptions = new JsonSerializerOptions
-        {
-            PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
-            DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
-            PropertyNameCaseInsensitive = true
-        };
-
-        // Custom retry pipeline with more aggressive retries
-        var retryOptions = new RetryStrategyOptions<HttpResponseMessage>
-        {
-            ShouldHandle = new PredicateBuilder<HttpResponseMessage>()
-                .Handle<HttpRequestException>()
-                .Handle<TaskCanceledException>()
-                .HandleResult(r => !r.IsSuccessStatusCode || r.StatusCode == HttpStatusCode.TooManyRequests),
-            MaxRetryAttempts = 5,
-            Delay = TimeSpan.FromSeconds(1),
-            BackoffType = DelayBackoffType.Exponential,
-            UseJitter = true
-        };
-
-        var retryPipeline = new ResiliencePipelineBuilder<HttpResponseMessage>()
-            .AddRetry(retryOptions)
-            .Build();
-
-        _apiClient = new ApiClient(httpClient, logger, jsonOptions, retryPipeline, disposeHttpClient: true);
+        _apiClient = apiClient;
     }
 
-    public async Task<Product> CreateProductAsync(CreateProductRequest request, string apiKey)
+    // Example 1: Request-specific tracing header
+    public async Task<Order> GetOrderAsync(string orderId, string traceId)
     {
-        var response = await _apiClient.PostAsync<CreateProductRequest, Product>(
-            new Uri("https://api.inventory.com/products"),
-            request,
-            apiKey,
-            AuthType.ApiKey);
+        var customHeaders = new Dictionary<string, string>
+        {
+            { "X-Trace-Id", traceId },
+            { "X-Request-Source", "Mobile-App" }
+        };
+
+        var response = await _apiClient.GetAsync<Order>(
+            new Uri($"https://api.orders.com/orders/{orderId}"),
+            customHeaders: customHeaders);
+
+        return response.Data!;
+    }
+
+    // Example 2: API versioning with custom header
+    public async Task<Product> GetProductV2Async(int productId)
+    {
+        var headers = new Dictionary<string, string>
+        {
+            { "X-API-Version", "2.0" },
+            { "X-Feature-Flags", "new-pricing,bulk-discount" }
+        };
+
+        var response = await _apiClient.GetAsync<Product>(
+            $"products/{productId}",
+            customHeaders: headers);
+
+        return response.Data!;
+    }
+
+    // Example 3: Combining authentication with custom headers
+    public async Task<Report> GenerateReportAsync(string apiKey, string reportType, string format)
+    {
+        var customHeaders = new Dictionary<string, string>
+        {
+            { "X-Report-Type", reportType },
+            { "X-Output-Format", format },
+            { "X-Request-Priority", "high" }
+        };
+
+        var response = await _apiClient.GetAsync<Report>(
+            new Uri("https://api.analytics.com/reports/generate"),
+            authToken: apiKey,
+            authType: AuthType.ApiKey,
+            customHeaders: customHeaders);
+
+        return response.Data!;
+    }
+}
+
+public record Order(string Id, decimal Total, DateTime CreatedAt);
+public record Product(int Id, string Name, decimal Price);
+public record Report(string Id, byte[] Data, string Format);
+```
+
+### 3. POST Request with Custom Headers
+
+```csharp
+public class PaymentService
+{
+    private readonly IApiClient _apiClient;
+
+    public PaymentService(IApiClient apiClient)
+    {
+        _apiClient = apiClient;
+    }
+
+    public async Task<PaymentResult> ProcessPaymentAsync(PaymentRequest payment, string idempotencyKey)
+    {
+        // Idempotency key prevents duplicate charges
+        var customHeaders = new Dictionary<string, string>
+        {
+            { "X-Idempotency-Key", idempotencyKey },
+            { "X-Client-Version", "1.2.3" },
+            { "X-Device-Id", Environment.MachineName }
+        };
+
+        var response = await _apiClient.PostAsync<PaymentRequest, PaymentResult>(
+            new Uri("https://api.payments.com/v1/charge"),
+            payload: payment,
+            authToken: "sk_live_xyz123",
+            authType: AuthType.ApiKey,
+            customHeaders: customHeaders);
 
         if (!response.Success)
         {
-            throw new InvalidOperationException($"Product creation failed: {response.ErrorMessage}");
+            throw new PaymentException($"Payment failed: {response.ErrorMessage}");
         }
 
         return response.Data!;
     }
 }
 
-public record CreateProductRequest(string Name, decimal Price, string Category);
-public record Product(int Id, string Name, decimal Price, string Category, DateTime CreatedAt);
-```
-
-### 3. Advanced Configuration with Multiple Resilience Strategies
-
-```csharp
-public class ConfigurableApiClient
-{
-    public static IApiClient CreateClient(ILogger<ApiClient> logger, ApiClientConfig config)
-    {
-        var httpClient = new HttpClient
-        {
-            Timeout = TimeSpan.FromSeconds(config.TimeoutSeconds),
-            BaseAddress = new Uri(config.BaseUrl)
-        };
-
-        // Add default headers
-        httpClient.DefaultRequestHeaders.Add("User-Agent", "MyApp/1.0");
-        httpClient.DefaultRequestHeaders.Add("Accept-Language", "en-US");
-
-        // Build comprehensive resilience pipeline
-        var retryOptions = new RetryStrategyOptions<HttpResponseMessage>
-        {
-            ShouldHandle = new PredicateBuilder<HttpResponseMessage>()
-                .Handle<HttpRequestException>()
-                .Handle<TaskCanceledException>()
-                .HandleResult(r => !r.IsSuccessStatusCode && 
-                    (r.StatusCode == HttpStatusCode.TooManyRequests || 
-                     r.StatusCode >= HttpStatusCode.InternalServerError)),
-            MaxRetryAttempts = config.RetryCount,
-            Delay = TimeSpan.FromSeconds(1),
-            BackoffType = DelayBackoffType.Exponential,
-            UseJitter = true,
-            OnRetry = args =>
-            {
-                logger.LogWarning("Retry {AttemptNumber} after {Delay}ms due to {Exception}", 
-                    args.AttemptNumber, 
-                    args.RetryDelay.TotalMilliseconds,
-                    args.Outcome.Exception?.GetType().Name ?? args.Outcome.Result?.StatusCode.ToString());
-                return ValueTask.CompletedTask;
-            }
-        };
-
-        var circuitBreakerOptions = new CircuitBreakerStrategyOptions<HttpResponseMessage>
-        {
-            ShouldHandle = new PredicateBuilder<HttpResponseMessage>()
-                .Handle<HttpRequestException>()
-                .HandleResult(r => r.StatusCode >= HttpStatusCode.InternalServerError),
-            FailureRatio = 0.5,
-            SamplingDuration = TimeSpan.FromSeconds(30),
-            MinimumThroughput = 10,
-            BreakDuration = TimeSpan.FromSeconds(60),
-            OnOpened = args =>
-            {
-                logger.LogWarning("Circuit breaker opened");
-                return ValueTask.CompletedTask;
-            },
-            OnClosed = args =>
-            {
-                logger.LogInformation("Circuit breaker closed");
-                return ValueTask.CompletedTask;
-            }
-        };
-
-        var resiliencePipeline = new ResiliencePipelineBuilder<HttpResponseMessage>()
-            .AddRetry(retryOptions)
-            .AddCircuitBreaker(circuitBreakerOptions)
-            .Build();
-
-        var jsonOptions = new JsonSerializerOptions
-        {
-            PropertyNamingPolicy = config.UseSnakeCase ? JsonNamingPolicy.SnakeCaseLower : JsonNamingPolicy.CamelCase,
-            DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
-            PropertyNameCaseInsensitive = true
-        };
-
-        return new ApiClient(httpClient, logger, jsonOptions, resiliencePipeline, disposeHttpClient: true);
-    }
-}
-
-public record ApiClientConfig
-{
-    public string BaseUrl { get; init; } = "";
-    public int TimeoutSeconds { get; init; } = 30;
-    public int RetryCount { get; init; } = 3;
-    public bool UseSnakeCase { get; init; } = false;
+public record PaymentRequest(decimal Amount, string Currency, string CardToken);
+public record PaymentResult(string TransactionId, string Status, DateTime ProcessedAt);
+public class PaymentException : Exception 
+{ 
+    public PaymentException(string message) : base(message) { } 
 }
 ```
 
-### 4. ASP.NET Core Web API Integration
+### 4. Advanced Configuration with Default and Custom Headers
 
 ```csharp
-[ApiController]
-[Route("api/[controller]")]
-public class UsersController : ControllerBase
+public class EnterpriseApiClient
 {
     private readonly IApiClient _apiClient;
-    private readonly ILogger<UsersController> _logger;
 
-    public UsersController(IApiClient apiClient, ILogger<UsersController> logger)
+    public EnterpriseApiClient(ILogger<ApiClient> logger, string environment)
     {
-        _apiClient = apiClient;
-        _logger = logger;
+        _apiClient = new ApiClient(
+            baseAddress: new Uri("https://api.enterprise.com"),
+            timeout: TimeSpan.FromSeconds(120),
+            logger: logger);
+
+        // Set default headers that apply to ALL requests
+        _apiClient.AddDefaultRequestHeader("X-Environment", environment);
+        _apiClient.AddDefaultRequestHeader("X-Client-Type", "EnterpriseClient");
+        _apiClient.AddDefaultRequestHeader("User-Agent", "EnterpriseApp/2.0");
     }
 
-    [HttpGet]
-    public async Task<ActionResult<List<User>>> GetUsers(CancellationToken cancellationToken)
+    public async Task<Customer> CreateCustomerAsync(
+        CreateCustomerRequest request, 
+        string apiKey, 
+        string correlationId)
     {
-        try
+        // These custom headers are ONLY for this specific request
+        var requestHeaders = new Dictionary<string, string>
         {
-            var authToken = Request.Headers.Authorization.ToString().Replace("Bearer ", "");
-            
-            var response = await _apiClient.GetAsync<List<User>>(
-                new Uri("https://external-api.com/users"),
-                authToken,
-                AuthType.Bearer,
-                cancellationToken);
-
-            if (response.Success)
-            {
-                return Ok(response.Data);
-            }
-
-            return response.StatusCode switch
-            {
-                HttpStatusCode.Unauthorized => Unauthorized(),
-                HttpStatusCode.Forbidden => Forbid(),
-                HttpStatusCode.NotFound => NotFound(),
-                _ => StatusCode(500, response.ErrorMessage)
-            };
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error fetching users");
-            return StatusCode(500, "An error occurred while fetching users");
-        }
-    }
-
-    [HttpPost]
-    public async Task<ActionResult<User>> CreateUser([FromBody] CreateUserRequest request, CancellationToken cancellationToken)
-    {
-        if (!ModelState.IsValid)
-        {
-            return BadRequest(ModelState);
-        }
-
-        try
-        {
-            var authToken = Request.Headers.Authorization.ToString().Replace("Bearer ", "");
-            
-            var response = await _apiClient.PostAsync<CreateUserRequest, User>(
-                new Uri("https://external-api.com/users"),
-                request,
-                authToken,
-                AuthType.Bearer,
-                cancellationToken);
-
-            if (response.Success)
-            {
-                return CreatedAtAction(nameof(GetUsers), new { id = response.Data!.Id }, response.Data);
-            }
-
-            return StatusCode((int)response.StatusCode, response.ErrorMessage);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error creating user");
-            return StatusCode(500, "An error occurred while creating the user");
-        }
-    }
-}
-```
-
-### 5. Background Service with Periodic API Calls
-
-```csharp
-public class DataSyncBackgroundService : BackgroundService
-{
-    private readonly IApiClient _apiClient;
-    private readonly ILogger<DataSyncBackgroundService> _logger;
-    private readonly IConfiguration _configuration;
-
-    public DataSyncBackgroundService(
-        IApiClient apiClient,
-        ILogger<DataSyncBackgroundService> logger,
-        IConfiguration configuration)
-    {
-        _apiClient = apiClient;
-        _logger = logger;
-        _configuration = configuration;
-    }
-
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
-    {
-        var intervalMinutes = _configuration.GetValue<int>("DataSync:IntervalMinutes", 5);
-        var apiKey = _configuration["DataSync:ApiKey"];
-
-        while (!stoppingToken.IsCancellationRequested)
-        {
-            try
-            {
-                _logger.LogInformation("Starting data synchronization");
-
-                await SyncDataAsync(apiKey!, stoppingToken);
-
-                _logger.LogInformation("Data synchronization completed successfully");
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error during data synchronization");
-            }
-
-            await Task.Delay(TimeSpan.FromMinutes(intervalMinutes), stoppingToken);
-        }
-    }
-
-    private async Task SyncDataAsync(string apiKey, CancellationToken cancellationToken)
-    {
-        // Sync multiple endpoints in parallel
-        var tasks = new[]
-        {
-            SyncEndpointAsync<Customer>("customers", apiKey, cancellationToken),
-            SyncEndpointAsync<Product>("products", apiKey, cancellationToken),
-            SyncEndpointAsync<Order>("orders", apiKey, cancellationToken)
+            { "X-Correlation-Id", correlationId },
+            { "X-Operation", "CreateCustomer" },
+            { "X-Request-Timestamp", DateTime.UtcNow.ToString("o") }
         };
 
-        await Task.WhenAll(tasks);
+        var response = await _apiClient.PostAsync<CreateCustomerRequest, Customer>(
+            new Uri("customers", UriKind.Relative),
+            payload: request,
+            authToken: apiKey,
+            authType: AuthType.ApiKey,
+            customHeaders: requestHeaders);
+
+        return response.Data!;
     }
 
-    private async Task SyncEndpointAsync<T>(string endpoint, string apiKey, CancellationToken cancellationToken)
+    // Headers can be built dynamically based on context
+    public async Task<List<Transaction>> GetTransactionsAsync(
+        string accountId, 
+        string userId,
+        TransactionQueryOptions options)
     {
-        try
+        var headers = new Dictionary<string, string>
         {
-            var response = await _apiClient.GetAsync<List<T>>(
-                new Uri($"https://api.example.com/{endpoint}"),
-                apiKey,
-                AuthType.ApiKey,
-                cancellationToken);
+            { "X-User-Id", userId },
+            { "X-Account-Id", accountId }
+        };
 
-            if (response.Success)
-            {
-                _logger.LogInformation("Synced {Count} {Endpoint} records", response.Data?.Count ?? 0, endpoint);
-                // Process and save data here
-            }
-            else
-            {
-                _logger.LogWarning("Failed to sync {Endpoint}: {Error}", endpoint, response.ErrorMessage);
-            }
-        }
-        catch (Exception ex)
+        // Add conditional headers based on options
+        if (options.IncludeMetadata)
         {
-            _logger.LogError(ex, "Error syncing {Endpoint}", endpoint);
+            headers["X-Include-Metadata"] = "true";
         }
+
+        if (options.PageSize.HasValue)
+        {
+            headers["X-Page-Size"] = options.PageSize.Value.ToString();
+        }
+
+        var response = await _apiClient.GetAsync<List<Transaction>>(
+            $"accounts/{accountId}/transactions",
+            customHeaders: headers);
+
+        return response.Data ?? new List<Transaction>();
     }
 }
 
-// Register in Program.cs
-builder.Services.AddHostedService<DataSyncBackgroundService>();
+public record CreateCustomerRequest(string Name, string Email);
+public record Customer(string Id, string Name, string Email);
+public record Transaction(string Id, decimal Amount, DateTime Date);
+public record TransactionQueryOptions(bool IncludeMetadata, int? PageSize);
 ```
 
 ## 🔧 Configuration Options
@@ -442,61 +315,57 @@ builder.Services.AddHostedService<DataSyncBackgroundService>();
 
 ```csharp
 // Bearer Token (JWT)
-await apiClient.GetAsync<User>(url, "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...", AuthType.Bearer);
+await apiClient.GetAsync<User>(url, authToken: "eyJhbGci...", authType: AuthType.Bearer);
 
 // Basic Authentication (Base64 encoded username:password)
 var credentials = Convert.ToBase64String(Encoding.UTF8.GetBytes($"{username}:{password}"));
-await apiClient.GetAsync<User>(url, credentials, AuthType.Basic);
+await apiClient.GetAsync<User>(url, authToken: credentials, authType: AuthType.Basic);
 
 // API Key (X-API-Key header)
-await apiClient.GetAsync<User>(url, "your-secret-api-key", AuthType.ApiKey);
+await apiClient.GetAsync<User>(url, authToken: "your-secret-api-key", authType: AuthType.ApiKey);
 
 // No authentication
 await apiClient.GetAsync<User>(url);
 ```
 
-### Custom JSON Serialization
+### Custom JSON Serialization with Newtonsoft.Json
 
 ```csharp
-var jsonOptions = new JsonSerializerOptions
+var jsonSettings = new JsonSerializerSettings
 {
-    PropertyNamingPolicy = JsonNamingPolicy.CamelCase, // Default behavior
-    DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
-    PropertyNameCaseInsensitive = true,
-    WriteIndented = false, // Compact JSON for better performance
-    Converters = { new JsonStringEnumConverter() } // Enum as strings
+    ContractResolver = new CamelCasePropertyNamesContractResolver(),
+    NullValueHandling = NullValueHandling.Ignore,
+    Formatting = Formatting.None,
+    DateFormatHandling = DateFormatHandling.IsoDateFormat,
+    Converters = new List<JsonConverter> 
+    { 
+        new StringEnumConverter() 
+    }
 };
 
-var apiClient = new ApiClient(httpClient, logger, jsonOptions);
+var apiClient = new ApiClient(
+    baseAddress: new Uri("https://api.example.com"),
+    jsonSettings: jsonSettings);
 ```
 
 ### Advanced Resilience Pipelines with Polly v8
 
 ```csharp
-// Simple retry with exponential backoff
+// Custom retry pipeline with exponential backoff
 var retryOptions = new RetryStrategyOptions<HttpResponseMessage>
 {
     MaxRetryAttempts = 3,
-    Delay = TimeSpan.FromSeconds(1),
-    BackoffType = DelayBackoffType.Exponential,
-    UseJitter = true
-};
-
-var retryPipeline = new ResiliencePipelineBuilder<HttpResponseMessage>()
-    .AddRetry(retryOptions)
-    .Build();
-
-// Advanced retry with custom conditions
-var advancedRetryOptions = new RetryStrategyOptions<HttpResponseMessage>
-{
-    ShouldHandle = new PredicateBuilder<HttpResponseMessage>()
-        .Handle<HttpRequestException>()
-        .Handle<TaskCanceledException>()
-        .HandleResult(r => !r.IsSuccessStatusCode || r.StatusCode == HttpStatusCode.TooManyRequests),
-    MaxRetryAttempts = 5,
-    Delay = TimeSpan.FromSeconds(2),
+    Delay = TimeSpan.FromMilliseconds(500),
     BackoffType = DelayBackoffType.Exponential,
     UseJitter = true,
+    ShouldHandle = new PredicateBuilder<HttpResponseMessage>()
+        .Handle<HttpRequestException>()
+        .Handle<TaskCanceledException>(ex => !ex.CancellationToken.IsCancellationRequested)
+        .HandleResult(r => r.StatusCode is
+            HttpStatusCode.RequestTimeout or
+            HttpStatusCode.TooManyRequests or
+            HttpStatusCode.ServiceUnavailable or
+            HttpStatusCode.GatewayTimeout),
     OnRetry = args =>
     {
         Console.WriteLine($"Retry {args.AttemptNumber} after {args.RetryDelay}");
@@ -504,27 +373,40 @@ var advancedRetryOptions = new RetryStrategyOptions<HttpResponseMessage>
     }
 };
 
-// Circuit breaker pattern
-var circuitBreakerOptions = new CircuitBreakerStrategyOptions<HttpResponseMessage>
-{
-    ShouldHandle = new PredicateBuilder<HttpResponseMessage>()
-        .Handle<HttpRequestException>()
-        .HandleResult(r => r.StatusCode >= HttpStatusCode.InternalServerError),
-    FailureRatio = 0.3, // 30% failure rate
-    SamplingDuration = TimeSpan.FromSeconds(30),
-    MinimumThroughput = 10,
-    BreakDuration = TimeSpan.FromSeconds(60)
-};
-
-// Combine multiple strategies
-var combinedPipeline = new ResiliencePipelineBuilder<HttpResponseMessage>()
-    .AddRetry(advancedRetryOptions)
-    .AddCircuitBreaker(circuitBreakerOptions)
-    .AddTimeout(TimeSpan.FromSeconds(30)) // Overall timeout
+var resiliencePipeline = new ResiliencePipelineBuilder<HttpResponseMessage>()
+    .AddRetry(retryOptions)
     .Build();
 
-var apiClient = new ApiClient(httpClient, logger, jsonOptions, combinedPipeline);
+var apiClient = new ApiClient(
+    baseAddress: new Uri("https://api.example.com"),
+    resiliencePipeline: resiliencePipeline);
 ```
+
+### No Retry Pipeline (High-Performance Scenarios)
+
+```csharp
+// For scenarios where retries are not desired (e.g., idempotent operations handled elsewhere)
+var noRetryPipeline = ApiClient.CreateNoRetryPipeline();
+
+var apiClient = new ApiClient(
+    baseAddress: new Uri("https://api.example.com"),
+    resiliencePipeline: noRetryPipeline);
+```
+
+### Default Light Retry Pipeline
+
+The library includes a sensible default retry pipeline that handles transient failures:
+
+- **Max Retry Attempts**: 2
+- **Delay**: 300ms with exponential backoff
+- **Jitter**: Enabled to prevent thundering herd
+- **Retry Conditions**:
+  - `HttpRequestException` (network failures)
+  - `TaskCanceledException` when NOT cancelled by user (timeout scenarios)
+  - HTTP 408 (Request Timeout)
+  - HTTP 429 (Too Many Requests)
+  - HTTP 503 (Service Unavailable)
+  - HTTP 504 (Gateway Timeout)
 
 ## 🛡️ Error Handling
 
@@ -544,7 +426,7 @@ public class ApiResponse<T>
 ### Error Handling Patterns
 
 ```csharp
-var response = await apiClient.GetAsync<User>(userUrl);
+var response = await apiClient.GetAsync<User>("users/123");
 
 // Pattern 1: Simple success check
 if (response.Success)
@@ -569,7 +451,7 @@ switch (response.StatusCode)
         // Refresh token or redirect to login
         break;
     case HttpStatusCode.TooManyRequests:
-        // Implement backoff (handled by retry policy)
+        // Rate limit exceeded
         break;
     default:
         _logger.LogError("Unexpected error {StatusCode}: {Error}", 
@@ -577,32 +459,126 @@ switch (response.StatusCode)
         break;
 }
 
-// Pattern 3: Exception-based handling
+// Pattern 3: Timeout detection
+if (!response.Success && response.ErrorMessage == "Request timeout")
+{
+    _logger.LogWarning("Request timed out, consider increasing timeout or checking network");
+}
+
+// Pattern 4: Exception-based handling
 public async Task<User> GetUserOrThrowAsync(int userId)
 {
-    var response = await apiClient.GetAsync<User>(new Uri($"https://api.example.com/users/{userId}"));
+    var response = await apiClient.GetAsync<User>($"users/{userId}");
     
     return response.Success 
         ? response.Data! 
-        : throw new HttpRequestException($"Failed to get user {userId}: {response.ErrorMessage}");
+        : throw new HttpRequestException(
+            $"Failed to get user {userId}: {response.ErrorMessage}");
+}
+```
+
+### Timeout Handling
+
+The library distinguishes between user-initiated cancellation and timeout:
+
+```csharp
+try
+{
+    using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+    var response = await apiClient.GetAsync<Data>("data", cancellationToken: cts.Token);
+    
+    if (!response.Success)
+    {
+        if (response.ErrorMessage == "Request timeout")
+        {
+            // HttpClient timeout exceeded
+            Console.WriteLine("Server took too long to respond");
+        }
+        else if (response.ErrorMessage == "Request cancelled")
+        {
+            // User cancelled via CancellationToken
+            Console.WriteLine("Request was cancelled by user");
+        }
+    }
+}
+catch (OperationCanceledException)
+{
+    // This won't normally occur as cancellation is handled internally
+    Console.WriteLine("Operation was cancelled");
+}
+```
+
+## 🔒 Configuration Safety
+
+### Configuration Lock Mechanism
+
+The ApiClient prevents configuration changes after the first request is sent to ensure thread-safety and predictable behavior:
+
+```csharp
+var client = new ApiClient(new Uri("https://api.example.com"));
+
+// ✅ OK - Before first request
+client.AddDefaultRequestHeader("X-Custom", "value");
+client.SetTimeout(TimeSpan.FromSeconds(30));
+
+// Send first request
+await client.GetAsync<Data>("data");
+
+// ❌ THROWS ApiClientConfigurationException - After first request
+try
+{
+    client.SetTimeout(TimeSpan.FromSeconds(60));
+}
+catch (ApiClientConfigurationException ex)
+{
+    Console.WriteLine($"Configuration error: {ex.Reason}");
+    // Output: Configuration error: TimeoutModificationNotAllowed
+}
+```
+
+### ApiClientConfigurationException
+
+```csharp
+public enum ApiClientConfigurationReason
+{
+    HeadersModificationNotAllowed,
+    BaseAddressModificationNotAllowed,
+    TimeoutModificationNotAllowed,
+    ClientDisposed
+}
+
+// Example handling
+try
+{
+    client.AddDefaultRequestHeader("X-New-Header", "value");
+}
+catch (ApiClientConfigurationException ex) when 
+    (ex.Reason == ApiClientConfigurationReason.HeadersModificationNotAllowed)
+{
+    // Handle configuration lock
+    _logger.LogWarning("Cannot modify headers after requests have been sent");
 }
 ```
 
 ## 📝 Logging Integration
 
-The ApiClient integrates with Microsoft.Extensions.Logging for comprehensive request/response logging:
+The ApiClient integrates with Microsoft.Extensions.Logging:
 
 ```csharp
-// The ApiClient automatically logs errors during HTTP requests
-// Configure logging levels in appsettings.json
+// Configure logging in appsettings.json
 {
     "Logging": {
         "LogLevel": {
             "Default": "Information",
-            "ARSoft.ApiClient.ApiClient": "Debug"
+            "ARSoft.RestApiClient.ApiClient": "Debug"
         }
     }
 }
+
+// The ApiClient will automatically log:
+// - Request cancellations (Debug level)
+// - Request timeouts (Warning level)
+// - HTTP errors (Error level)
 ```
 
 ## 🧪 Testing
@@ -611,68 +587,38 @@ The ApiClient integrates with Microsoft.Extensions.Logging for comprehensive req
 
 ```csharp
 [Test]
-public async Task GetAsync_Success_ReturnsData()
+public async Task GetAsync_WithCustomHeaders_Success()
 {
     // Arrange
     var mockHandler = new Mock<HttpMessageHandler>();
-    var mockLogger = new Mock<ILogger<ApiClient>>();
-    
     var expectedResponse = new HttpResponseMessage(HttpStatusCode.OK)
     {
-        Content = new StringContent(JsonSerializer.Serialize(new User { Id = 1, Name = "Test User" }))
+        Content = new StringContent(JsonConvert.SerializeObject(
+            new User { Id = 1, Name = "Test User" }))
     };
     
     mockHandler.Protected()
         .Setup<Task<HttpResponseMessage>>(
             "SendAsync",
-            ItExpr.IsAny<HttpRequestMessage>(),
+            ItExpr.Is<HttpRequestMessage>(req => 
+                req.Headers.Contains("X-Custom-Header")),
             ItExpr.IsAny<CancellationToken>())
         .ReturnsAsync(expectedResponse);
     
-    var httpClient = new HttpClient(mockHandler.Object);
-    var apiClient = new ApiClient(httpClient, mockLogger.Object, disposeHttpClient: true);
+    var apiClient = new ApiClient(new Uri("https://api.test.com"));
     
     // Act
-    var result = await apiClient.GetAsync<User>(new Uri("https://api.test.com/users/1"));
+    var headers = new Dictionary<string, string> 
+    { 
+        { "X-Custom-Header", "test-value" } 
+    };
+    var result = await apiClient.GetAsync<User>(
+        "users/1",
+        customHeaders: headers);
     
     // Assert
     Assert.IsTrue(result.Success);
     Assert.AreEqual("Test User", result.Data!.Name);
-}
-```
-
-### Integration Testing
-
-```csharp
-[TestFixture]
-public class ApiClientIntegrationTests
-{
-    private IApiClient _apiClient = null!;
-
-    [SetUp]
-    public void Setup()
-    {
-        var httpClient = new HttpClient();
-        var logger = new Mock<ILogger<ApiClient>>().Object;
-        _apiClient = new ApiClient(httpClient, logger, disposeHttpClient: true);
-    }
-
-    [Test]
-    public async Task GetAsync_RealApi_Success()
-    {
-        // Test against a real API endpoint
-        var response = await _apiClient.GetAsync<JsonElement>(
-            new Uri("https://jsonplaceholder.typicode.com/posts/1"));
-
-        Assert.IsTrue(response.Success);
-        Assert.IsNotNull(response.Data);
-    }
-
-    [TearDown]
-    public void TearDown()
-    {
-        _apiClient?.Dispose();
-    }
 }
 ```
 
@@ -681,17 +627,20 @@ public class ApiClientIntegrationTests
 ### Dependencies
 
 - **.NET 6+** (with nullable reference types support)
-- **System.Text.Json 8.0.0+**
+- **Newtonsoft.Json 13.0.3+**
 - **Polly 8.6.2+**
 - **Polly.Core 8.6.2+**
 - **Microsoft.Extensions.Logging.Abstractions 9.0.0+**
 
 ### Performance Benefits
 
-- **System.Text.Json**: High-performance JSON serialization
-- **HTTP Connection Pooling**: Efficient connection reuse through HttpClient
-- **Built-in Resilience**: Reduces transient failure impact with Polly v8
-- **Memory Efficiency**: Minimal allocations with modern .NET patterns
+- **Newtonsoft.Json with Streaming**: High-performance JSON deserialization using StreamReader and JsonTextReader
+- **Per-Instance HttpClient**: Isolated configuration prevents cross-contamination between different client instances
+- **HTTP Connection Pooling**: Efficient connection reuse within each client
+- **Built-in Resilience**: Reduces transient failure impact with intelligent Polly v8 retry strategies
+- **Memory Efficiency**: Streaming deserialization for large responses with `ResponseHeadersRead`
+- **Thread-Safe**: Designed for concurrent requests with proper locking mechanisms
+- **Timeout Detection**: Distinguishes between user cancellation and HttpClient timeout for better observability
 
 ## 🤝 Contributing
 
@@ -705,107 +654,92 @@ public class ApiClientIntegrationTests
 
 This project is licensed under the MIT License - see the LICENSE file for details.
 
-## 📄 Version History
+## 📜 Version History
 
-### v3.0.4 (Current - .NET 6+)
-- JsonSerializerOptions default settings improved to suit most use cases
-- Constructor summary comments added for better IntelliSense support
+### v3.3.0 (Current - .NET 6+)
+- **Breaking Change**: Each `ApiClient` instance now manages its own `HttpClient` instead of sharing a static instance
+- **New Feature**: Added relative path support - `GetAsync<T>(string relativePath)` overload for convenience
+- **Performance**: Switched to Newtonsoft.Json with streaming (StreamReader/JsonTextReader) for better memory efficiency
+- **Enhanced Resilience**: Improved default retry pipeline with better timeout handling
+- **Enhanced Error Handling**: Better distinction between user-initiated cancellation and timeout scenarios
+- **New Method**: `CreateNoRetryPipeline()` static method for scenarios requiring no retry logic
+- **Improved Timeout Detection**: Separate catch block for `TaskCanceledException` when not user-cancelled
+- **Better Logging**: Enhanced logging with URL context in error messages
+- **Configuration Flexibility**: Full support for custom `ResiliencePipeline<HttpResponseMessage>` injection
 
-### v3.0.0  
-- **Breaking Changes**: Migrated to Polly v8 with ResiliencePipeline
-- Updated to use modern Polly.Core instead of legacy Polly extensions
-- Improved nullable reference types support
-- Enhanced error handling and logging
-- Added proper resource disposal support
-- Simplified configuration with default retry strategies
-- Updated to latest System.Text.Json patterns
+### v3.2.0
+- **New Feature**: Added `customHeaders` parameter to all HTTP methods for request-specific headers
+- Enhanced header flexibility with per-request custom header support
+- Improved examples demonstrating custom header usage patterns
+- Added comprehensive documentation for multi-tenant, webhook, and rate-limiting scenarios
+- Updated all method signatures to support `Dictionary<string, string>? customHeaders`
 
-### Migration from v2.0 (Polly v7)
-- Replace `IAsyncPolicy<HttpResponseMessage>` with `ResiliencePipeline<HttpResponseMessage>`
-- Update policy creation to use `ResiliencePipelineBuilder<T>` instead of `HttpPolicyExtensions`
-- Use new `RetryStrategyOptions` and `CircuitBreakerStrategyOptions` configuration
-- Replace callback delegates with `ValueTask`-returning delegates
-- Update exception handling predicates using `PredicateBuilder<T>`
-
-### Key Improvements in v3.0
-- **Better Performance**: Polly v8 offers significant performance improvements
-- **Modern Patterns**: Aligned with current .NET and Polly best practices
-- **Enhanced Configurability**: More granular control over resilience strategies
-- **Improved Diagnostics**: Better error reporting and logging integration
-
-
- 
-
-### Major Architectural Changes
-The `ApiClient` has been fully refactored in **v3.1.1** to ensure safer, cleaner, and more predictable usage patterns while improving thread-safety and encapsulation.
-
-#### 🧱 Key Changes
-- **Internal HttpClient Management**: The library now manages its own shared `HttpClient` instance. Consumers no longer pass or dispose `HttpClient` objects.
-- **Thread-Safe Shared Instance**: A single internal `HttpClient` is reused across all calls and instances, preventing socket exhaustion and enabling high concurrency.
-- **Configuration Validation**: Attempts to modify critical configuration after the first request (like `BaseAddress`, `Timeout`, or `DefaultRequestHeaders`) now throw a specific `ApiClientConfigurationException`.
-- **Safer Disposal**: Disposing an `ApiClient` no longer disposes the shared `HttpClient` (avoids breaking other in-flight requests).
-- **Improved Concurrency**: All requests are now explicitly isolated and thread-safe through independent `HttpRequestMessage` and deserialization streams.
-
-#### ⚙️ Configuration Restrictions
-To maintain stability, certain configuration changes are only allowed before the first request:
-- `SetBaseAddress(Uri baseAddress)`
-- `SetTimeout(TimeSpan timeout)`
-- `AddDefaultRequestHeader(string name, string value)`
-
-If called after any request has been sent, an `ApiClientConfigurationException` will be raised with one of the following reasons:
-```csharp
-public enum ApiClientConfigurationReason
-{
-    HeadersModificationNotAllowed,
-    BaseAddressModificationNotAllowed,
-    TimeoutModificationNotAllowed,
-    ClientDisposed
-}
-```
-
-#### 🚀 Updated Usage Example
-```csharp
-var apiClient = new ApiClient(
-    baseAddress: new Uri("https://api.example.com"),
-    timeout: TimeSpan.FromSeconds(60),
-    logger: loggerInstance);
-
-// Optional configuration before first request
-apiClient.AddDefaultRequestHeader("User-Agent", "MyApp/1.0");
-
-// Safe concurrent requests
-var task1 = apiClient.GetAsync<User>(new Uri("users/1", UriKind.Relative));
-var task2 = apiClient.PostAsync<CreateUserRequest, User>(new Uri("users", UriKind.Relative), new CreateUserRequest("Alice"));
-await Task.WhenAll(task1, task2);
-```
-
-#### 🧩 Exception Example
-```csharp
-try
-{
-    var client = new ApiClient(new Uri("https://api.service.com"));
-    await client.GetAsync<object>(); // After this, configuration is locked.
-    client.SetTimeout(TimeSpan.FromSeconds(10)); // Throws ApiClientConfigurationException
-}
-catch (ApiClientConfigurationException ex)
-{
-    Console.WriteLine($"Configuration change not allowed: {ex.Reason} - {ex.Message}");
-}
-```
-
-#### ✅ Benefits
-- No more `HttpClient` leaks or lifetime confusion
-- Safe for parallel requests across threads
-- Predictable configuration lifecycle
-- Clear and specific exception handling for misuse
-
----
-
-### v3.1.1 (Upcoming / Current Refactor)
+### v3.1.1
 - **Breaking Change**: Removed constructor parameter for external `HttpClient`
 - Added internal shared `HttpClient` managed by library
 - Added `ApiClientConfigurationException` for post-start configuration changes
 - Improved concurrency and memory safety
 - Enhanced XML documentation for all public members
 - Internal locking for thread-safe configuration state
-- Disposing `ApiClient` no longer disposes `HttpClient`
+
+### v3.1.0
+- **New Feature**: Custom authentication type support
+- Added `CustomAuthInfo` record for flexible header configuration
+- Enhanced authentication flexibility
+
+### v3.0.4
+- JsonSerializerOptions default settings improved
+- Constructor summary comments added for better IntelliSense support
+
+### v3.0.0
+- **Breaking Changes**: Migrated to Polly v8 with ResiliencePipeline
+- Updated to use modern Polly.Core
+- Improved nullable reference types support
+- Enhanced error handling and logging
+- Added proper resource disposal support
+- Simplified configuration with default retry strategies
+
+### Migration Notes
+
+#### From v3.2.0 to v3.3.0
+- **IMPORTANT**: `ApiClient` no longer shares a static `HttpClient`. Each instance has its own.
+- **Impact**: If you were relying on shared configuration across instances, you'll need to adjust your code.
+- **Recommendation**: Use dependency injection with singleton `ApiClient` instances for each base URL.
+- **New Feature**: Can now use relative paths: `GetAsync<T>("users/1")` instead of always using full URIs.
+- **JSON Library**: Now uses Newtonsoft.Json instead of System.Text.Json (more stable for complex scenarios).
+
+Example migration:
+```csharp
+// Before (v3.2.0) - shared static HttpClient
+var client1 = new ApiClient(timeout: TimeSpan.FromSeconds(30));
+var client2 = new ApiClient(timeout: TimeSpan.FromSeconds(15));
+// client2 would affect client1's timeout ❌
+
+// After (v3.3.0) - isolated HttpClients
+var client1 = new ApiClient(timeout: TimeSpan.FromSeconds(30));
+var client2 = new ApiClient(timeout: TimeSpan.FromSeconds(15));
+// Each has independent configuration ✅
+```
+
+#### From v3.1.x to v3.2.0
+- Replace `CustomAuthInfo` usage with `customHeaders` dictionary
+- Old: `new CustomAuthInfo { HeaderName = "token", HeaderValue = "abc" }`
+- New: `customHeaders: new Dictionary<string, string> { { "token", "abc" } }`
+
+#### From v3.0.x to v3.1.x
+- Remove external `HttpClient` instantiation
+- Use new constructor: `new ApiClient(baseAddress, timeout, logger)`
+- Configuration methods must be called before first request
+
+#### From v2.x to v3.0.0
+- Replace `IAsyncPolicy<HttpResponseMessage>` with `ResiliencePipeline<HttpResponseMessage>`
+- Update policy creation to use `ResiliencePipelineBuilder<T>`
+- Use new `RetryStrategyOptions` configuration
+
+### Key Improvements in v3.3.0
+- **Isolated Configuration**: Each ApiClient instance fully independent with its own HttpClient
+- **Better Resource Management**: Proper disposal of per-instance HttpClient
+- **Enhanced Performance**: Streaming JSON deserialization with Newtonsoft.Json
+- **Improved Developer Experience**: Relative path support for cleaner code
+- **Better Observability**: Enhanced timeout detection and logging with request context
+- **More Flexible**: Easy to create multiple clients with different configurations without interference

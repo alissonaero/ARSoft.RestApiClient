@@ -8,37 +8,54 @@
 
 	  <!-- Metadados do pacote NuGet -->
 	  <PackageId>ARSoft.RestApiClient</PackageId>
-	  <Version>3.1.1</Version>
+	  <Version>3.3.0</Version>
 	  <Authors>Alisson Santana</Authors>
 	  <Company>ARSoftware</Company>
-	  <Description>A modern, resilient HTTP API client library for .NET Core/5+ applications, providing clean async HTTP operations with built-in retry policies, comprehensive error handling, and structured logging support.	  </Description>
+	  <Description>ApiClient Library for .NET Core and .NET 5+ applications
+A modern, resilient HTTP API client library for .NET Core and .NET 5+ applications, providing clean, async HTTP operations with built-in retry policies using Polly v8, comprehensive error handling, and structured logging support. Optimized for high-performance API consumption in cross-platform and cloud-native environments.
+🎯 Features
+
+Modern .NET Support: Built for .NET 6+ with nullable reference types
+Polly v8 Integration: Flexible resilience pipelines with exponential backoff and jitter
+Per-Instance HttpClient: Each ApiClient manages its own HttpClient for isolated configuration
+Structured Logging: ILogger integration for comprehensive request/response logging
+Flexible Authentication: Bearer, Basic, and API Key authentication support
+Custom Headers Support: Add dynamic headers per request or globally
+Thread-Safe Design: Proper concurrency handling with internal locking
+Clean Architecture: SOLID principles with dependency injection support
+Comprehensive Error Handling: Detailed error responses with HTTP status codes and timeout detection
+Async/Await: Full asynchronous operation support with cancellation tokens
+Configuration Validation: Prevents unsafe configuration changes after initialization
+Relative Path Support: Built-in support for relative URLs with BaseAddress configuration
+Streaming Performance: Efficient JSON deserialization using Newtonsoft.Json with streaming</Description>
 	  <Copyright>Copyright © 2024 Alisson</Copyright>
 	  <PackageProjectUrl>https://github.com/alissonaero/ARSoft.RestApiClient</PackageProjectUrl>
 	  <RepositoryUrl>https://github.com/alissonaero/ARSoft.RestApiClient.git</RepositoryUrl>
 	  <RepositoryType>git</RepositoryType>
 	  <PackageTags>api rest httpclient polly json .net</PackageTags>
 	  <PackageReleaseNotes>
-		  Modern .NET Support: Built for .NET Core 3.1+ and .NET 5+
-		  System.Text.Json: High-performance JSON serialization
-		  Polly Integration: Built-in retry policies with exponential backoff using modern Polly extensions
-		  Structured Logging: ILogger integration for comprehensive request/response logging
-		  Multiple Auth Types: Bearer, Basic, and API Key authentication support
-		  Clean Architecture: SOLID principles with dependency injection support
-		  Comprehensive Error Handling: Detailed error responses with HTTP status codes
-		  Async/Await: Full asynchronous operation support with cancellation tokens
+		  Key Improvements in v3.3.0
+
+		  Isolated Configuration: Each ApiClient instance fully independent with its own HttpClient
+		  Better Resource Management: Proper disposal of per-instance HttpClient
+		  Enhanced Performance: Streaming JSON deserialization with Newtonsoft.Json
+		  Improved Developer Experience: Relative path support for cleaner code
+		  Better Observability: Enhanced timeout detection and logging with request context
+		  More Flexible: Easy to create multiple clients with different configurations without interference
 	  </PackageReleaseNotes>
 	  <PackageLicenseExpression>MIT</PackageLicenseExpression>
 	  <PackageReadmeFile>readme.md</PackageReadmeFile>
 	  <PackageIcon>icon.png</PackageIcon>
-	  <AssemblyVersion>3.1.1</AssemblyVersion>
-	  <FileVersion>3.1.1</FileVersion>
+	  <AssemblyVersion>3.3.0</AssemblyVersion>
+	  <FileVersion>3.3.0</FileVersion>
 	  
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="9.0.10" />
-    <PackageReference Include="Polly" Version="8.6.4" />
-    <PackageReference Include="Polly.Core" Version="8.6.4" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.1" />
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
+    <PackageReference Include="Polly" Version="8.6.5" />
+    <PackageReference Include="Polly.Core" Version="8.6.5" />
 	<None Include="icon.png" Pack="true" PackagePath="\" />
 	<None Include="readme.md" Pack="true" PackagePath="\" />
   </ItemGroup>
