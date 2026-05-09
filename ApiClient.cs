@@ -499,7 +499,7 @@ public sealed class ApiClient : IApiClient, IDisposable
 					if (TryAddRequestHeader(request, header.Key, header.Value))
 						continue;
 				}
-				
+
 				request.Content?.Headers.Remove(header.Key);
 				if (request.Content?.Headers.TryAddWithoutValidation(header.Key, header.Value) == true)
 					continue;
@@ -509,17 +509,8 @@ public sealed class ApiClient : IApiClient, IDisposable
 		}
 	}
 
-	private static bool TryAddRequestHeader(HttpRequestMessage request, string name, string value)
-	{
-		try
-		{
-			return request.Headers.TryAddWithoutValidation(name, value);
-		}
-		catch (InvalidOperationException)
-		{
-			return false;
-		}
-	}
+	private static bool TryAddRequestHeader(HttpRequestMessage request, string name, string value) =>	
+		request.Headers.TryAddWithoutValidation(name, value);
 
 	private static bool IsContentHeader(string name)
 	{
@@ -649,6 +640,8 @@ public static class ApiClientExtensions
 
 	private static ApiClient GetApiClient(IApiClient client)
 	{
+		ArgumentNullException.ThrowIfNull(client);
+
 		if (client is ApiClient apiClient)
 			return apiClient;
 
