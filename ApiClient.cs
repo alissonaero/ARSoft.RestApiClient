@@ -1,4 +1,4 @@
-﻿using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Serialization;
 using Polly;
@@ -201,12 +201,25 @@ public sealed class ApiClient : IApiClient, IDisposable
 		ILogger<ApiClient>? logger = null,
 		JsonSerializerSettings? jsonSettings = null,
 		ResiliencePipeline<HttpResponseMessage>? resiliencePipeline = null)
+		: this(new HttpClientHandler(), baseAddress, timeout, logger, jsonSettings, resiliencePipeline)
 	{
+	}
+
+	public ApiClient(
+		HttpMessageHandler httpMessageHandler,
+		Uri? baseAddress = null,
+		TimeSpan? timeout = null,
+		ILogger<ApiClient>? logger = null,
+		JsonSerializerSettings? jsonSettings = null,
+		ResiliencePipeline<HttpResponseMessage>? resiliencePipeline = null)
+	{
+		ArgumentNullException.ThrowIfNull(httpMessageHandler);
+
 		_logger = logger;
 		_jsonSettings = jsonSettings ?? DefaultJsonOptions();
 		_resiliencePipeline = resiliencePipeline ?? CreateLightRetryPipeline();
 
-		_httpClient = new HttpClient
+		_httpClient = new HttpClient(httpMessageHandler)
 		{
 			Timeout = timeout ?? TimeSpan.FromSeconds(30)
 		};
@@ -381,8 +394,8 @@ public sealed class ApiClient : IApiClient, IDisposable
 			response = await _resiliencePipeline.ExecuteAsync(async token =>
 			{
 				using var request = new HttpRequestMessage(method, url);
-				SetHeaders(request, authToken, authType, customHeaders);
 				SetContent(request, payload, method);
+				SetHeaders(request, authToken, authType, customHeaders);
 
 				return await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token);
 			}, cancellationToken);
@@ -480,10 +493,38 @@ public sealed class ApiClient : IApiClient, IDisposable
 		{
 			foreach (var header in customHeaders)
 			{
-				request.Headers.Remove(header.Key);
-				request.Headers.Add(header.Key, header.Value);
+				if (!IsContentHeader(header.Key))
+				{
+					request.Headers.Remove(header.Key);
+					if (TryAddRequestHeader(request, header.Key, header.Value))
+						continue;
+				}
+
+				request.Content?.Headers.Remove(header.Key);
+				if (request.Content?.Headers.TryAddWithoutValidation(header.Key, header.Value) == true)
+					continue;
+
+				throw new InvalidOperationException($"Header '{header.Key}' could not be added to the request.");
 			}
 		}
+	}
+
+	private static bool TryAddRequestHeader(HttpRequestMessage request, string name, string value) =>	
+		request.Headers.TryAddWithoutValidation(name, value);
+
+	private static bool IsContentHeader(string name)
+	{
+		return name.Equals("Allow", StringComparison.OrdinalIgnoreCase) ||
+			name.Equals("Content-Disposition", StringComparison.OrdinalIgnoreCase) ||
+			name.Equals("Content-Encoding", StringComparison.OrdinalIgnoreCase) ||
+			name.Equals("Content-Language", StringComparison.OrdinalIgnoreCase) ||
+			name.Equals("Content-Length", StringComparison.OrdinalIgnoreCase) ||
+			name.Equals("Content-Location", StringComparison.OrdinalIgnoreCase) ||
+			name.Equals("Content-MD5", StringComparison.OrdinalIgnoreCase) ||
+			name.Equals("Content-Range", StringComparison.OrdinalIgnoreCase) ||
+			name.Equals("Content-Type", StringComparison.OrdinalIgnoreCase) ||
+			name.Equals("Expires", StringComparison.OrdinalIgnoreCase) ||
+			name.Equals("Last-Modified", StringComparison.OrdinalIgnoreCase);
 	}
 
 	/// <summary>
@@ -525,7 +566,12 @@ public sealed class ApiClient : IApiClient, IDisposable
 					HttpStatusCode.RequestTimeout or
 					HttpStatusCode.TooManyRequests or
 					HttpStatusCode.ServiceUnavailable or
-					HttpStatusCode.GatewayTimeout)
+					HttpStatusCode.GatewayTimeout),
+			OnRetry = args =>
+			{
+				args.Outcome.Result?.Dispose();
+				return ValueTask.CompletedTask;
+			}
 		};
 
 		return new ResiliencePipelineBuilder<HttpResponseMessage>()
@@ -572,5 +618,33 @@ public sealed class ApiClient : IApiClient, IDisposable
 			_httpClient.Dispose();
 			_disposed = true;
 		}
+	}
+}
+
+public static class ApiClientExtensions
+{
+	public static void AddDefaultRequestHeader(this IApiClient client, string name, string value)
+	{
+		GetApiClient(client).AddDefaultRequestHeader(name, value);
+	}
+
+	public static void SetBaseAddress(this IApiClient client, Uri baseAddress)
+	{
+		GetApiClient(client).SetBaseAddress(baseAddress);
+	}
+
+	public static void SetTimeout(this IApiClient client, TimeSpan timeout)
+	{
+		GetApiClient(client).SetTimeout(timeout);
+	}
+
+	private static ApiClient GetApiClient(IApiClient client)
+	{
+		ArgumentNullException.ThrowIfNull(client);
+
+		if (client is ApiClient apiClient)
+			return apiClient;
+
+		throw new NotSupportedException($"This operation requires an {nameof(ApiClient)} instance.");
 	}
 }

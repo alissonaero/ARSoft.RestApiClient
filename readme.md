@@ -25,9 +25,9 @@ A modern, resilient HTTP API client library for .NET Core and .NET 5+ applicatio
 Add to your project via NuGet Package Manager or .csproj:
 
 ```xml
-<PackageReference Include="Polly.Core" Version="8.6.2" />
-<PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="9.0.0" />
-<PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+<PackageReference Include="Polly.Core" Version="8.6.6" />
+<PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.7" />
+<PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
 ```
 
 ## 📖 Basic Usage
@@ -627,10 +627,10 @@ public async Task GetAsync_WithCustomHeaders_Success()
 ### Dependencies
 
 - **.NET 6+** (with nullable reference types support)
-- **Newtonsoft.Json 13.0.3+**
-- **Polly 8.6.2+**
-- **Polly.Core 8.6.2+**
-- **Microsoft.Extensions.Logging.Abstractions 9.0.0+**
+- **Newtonsoft.Json 13.0.4+**
+- **Polly 8.6.6+**
+- **Polly.Core 8.6.6+**
+- **Microsoft.Extensions.Logging.Abstractions 10.0.7+**
 
 ### Performance Benefits
 
@@ -656,7 +656,13 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 ## 📜 Version History
 
-### v3.3.0 (Current - .NET 6+)
+### v3.3.1 (Current - .NET 6+)
+- **Compatibility**: Added extension helpers so documented `IApiClient` configuration examples compile while preserving the existing interface contract
+- **Reliability**: Improved custom header handling for content headers such as `Content-Type`
+- **Resource Management**: Disposes transient HTTP responses produced during default retry attempts
+- **Dependencies**: Updated Polly and logging abstractions patch versions
+
+### v3.3.0
 - **Breaking Change**: Each `ApiClient` instance now manages its own `HttpClient` instead of sharing a static instance
 - **New Feature**: Added relative path support - `GetAsync<T>(string relativePath)` overload for convenience
 - **Performance**: Switched to Newtonsoft.Json with streaming (StreamReader/JsonTextReader) for better memory efficiency

@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
@@ -6,9 +6,8 @@
     <Nullable>enable</Nullable>
 	<GeneratePackageOnBuild>true</GeneratePackageOnBuild>
 
-	  <!-- Metadados do pacote NuGet -->
 	  <PackageId>ARSoft.RestApiClient</PackageId>
-	  <Version>3.3.0</Version>
+	  <Version>3.3.1</Version>
 	  <Authors>Alisson Santana</Authors>
 	  <Company>ARSoftware</Company>
 	  <Description>ApiClient Library for .NET Core and .NET 5+ applications
@@ -34,28 +33,31 @@ Streaming Performance: Efficient JSON deserialization using Newtonsoft.Json with
 	  <RepositoryType>git</RepositoryType>
 	  <PackageTags>api rest httpclient polly json .net</PackageTags>
 	  <PackageReleaseNotes>
-		  Key Improvements in v3.3.0
+		  Key Improvements in v3.3.1
 
-		  Isolated Configuration: Each ApiClient instance fully independent with its own HttpClient
-		  Better Resource Management: Proper disposal of per-instance HttpClient
-		  Enhanced Performance: Streaming JSON deserialization with Newtonsoft.Json
-		  Improved Developer Experience: Relative path support for cleaner code
-		  Better Observability: Enhanced timeout detection and logging with request context
-		  More Flexible: Easy to create multiple clients with different configurations without interference
+		  Improved custom header handling for request and content headers
+		  Disposes transient retry responses produced by the default Polly pipeline
+		  Added backward-compatible IApiClient extension helpers for ApiClient configuration methods
 	  </PackageReleaseNotes>
 	  <PackageLicenseExpression>MIT</PackageLicenseExpression>
 	  <PackageReadmeFile>readme.md</PackageReadmeFile>
 	  <PackageIcon>icon.png</PackageIcon>
-	  <AssemblyVersion>3.3.0</AssemblyVersion>
-	  <FileVersion>3.3.0</FileVersion>
+	  <AssemblyVersion>3.3.1</AssemblyVersion>
+	  <FileVersion>3.3.1</FileVersion>
 	  
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.1" />
+    <Compile Remove="tests\**\*.cs" />
+    <EmbeddedResource Remove="tests\**\*" />
+    <None Remove="tests\**\*" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.7" />
     <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
-    <PackageReference Include="Polly" Version="8.6.5" />
-    <PackageReference Include="Polly.Core" Version="8.6.5" />
+    <PackageReference Include="Polly" Version="8.6.6" />
+    <PackageReference Include="Polly.Core" Version="8.6.6" />
 	<None Include="icon.png" Pack="true" PackagePath="\" />
 	<None Include="readme.md" Pack="true" PackagePath="\" />
   </ItemGroup>
